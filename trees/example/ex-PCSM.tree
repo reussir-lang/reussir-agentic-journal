@@ -34,9 +34,10 @@ pub fn clamp(a: [f32; ?], limit: f32) -> [f32; ?] {
 }
 
 fn clamp_copy(a: [f32; ?], limit: f32, i: i64) -> [f32; ?] {
-    if (i as u64) >= array::dim(a, 0) { a }
-    else if array::get(a, i) > limit { clamp_copy(array::set(a, i, limit), limit, i + 1) }
-    else { clamp_copy(a, limit, i + 1) }
+    if (i as u64) >= array::dim(a, 0) { a } else {
+        if array::get(a, i) > limit { clamp_copy(array::set(a, i, limit), limit, i + 1) }
+        else { clamp_copy(a, limit, i + 1) }
+    }
 }
 ~}
 \ul{
@@ -44,4 +45,4 @@ fn clamp_copy(a: [f32; ?], limit: f32, i: i64) -> [f32; ?] {
 \li{The store is masked by the comparison, so only the elements above the limit are written. No blend is needed.}
 \li{\code{\verb~|as_mut~} is where the program takes responsibility for writing through a pointer that was handed out read-only.}
 }
-\p{Belongs to [SIMD vectors](design-simd-vectors). Written against the draft; not compiled.}
+\p{Belongs to [SIMD vectors](design-simd-vectors). A fixed-vector form of it runs in the standard library tests, \pr{1006}; the scalable form shown here compiles and has not been executed.}

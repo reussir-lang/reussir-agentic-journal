@@ -46,4 +46,4 @@ pub fn matmul(a: Simd<[f32; 4, 4]>, b: Simd<[f32; 4, 4]>) -> Simd<[f32; 4, 4]> {
 \li{The matrix product adds four outer products. \code{\verb~|vector.contract~} would say it in one operation; it waits for affine maps in the language, see [prob-Y593](prob-Y593).}
 \li{A fixed two-dimensional vector such as \code{\verb~|Simd<[f32; 4, 4]>~} can be a record field, so a transform can be stored and passed around like any value.}
 }
-\p{Belongs to [SIMD vectors](design-simd-vectors). Written against the draft; not compiled.}
+\p{Belongs to [SIMD vectors](design-simd-vectors). The matrix product runs, with the matrices passed through pointers, in \pr{1005}.}

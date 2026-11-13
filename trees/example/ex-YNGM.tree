@@ -34,4 +34,4 @@ pub fn lines(t: Text) -> u64 {
 \li{The same source works with \code{\verb~|Simd<[u8; [16]]>~} and a step of \code{\verb~|lanes~}; the fixed form is shown because a fixed vector may also be kept in a record, for example as a precomputed table.}
 \li{A faster variant keeps a vector of per-lane counters and reduces it once at the end; it needs a flush every 255 iterations when the counters are bytes.}
 }
-\p{Belongs to [SIMD vectors](design-simd-vectors). Written against the draft; not compiled.}
+\p{Belongs to [SIMD vectors](design-simd-vectors). It runs in the standard library tests with 16 lanes, \pr{1006}.}

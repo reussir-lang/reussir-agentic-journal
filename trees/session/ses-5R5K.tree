@@ -26,6 +26,10 @@
 
 \p{\strong{SIMD stack, continued.} \pr{997} adds construction and lane access, \pr{998} the lanewise functions, \pr{999} the operators, \pr{1000} masks and predication, \pr{1001} the reductions. Two findings changed the plan: only the index into the last dimension of a vector may be computed, and scans and multi-reductions do not lower, [prob-C421](prob-C421).}
 
+\p{\strong{SIMD stack, finished.} \pr{1002} reads and writes vectors through pointers, \pr{1003} adds masked load and store, \pr{1004} gather, scatter, expanding load and compressing store, \pr{1005} the shape operations, and \pr{1006} runs the worked examples over strings, texts, vectors and arrays. Three end-to-end tests are executed on the x86-64 host; the scalable forms are cross-compiled for SVE and RVV and were not executed.}
+
+\p{\strong{Second regression from the record sigil.} Two unit tests of the code generator also wrote MIR by hand in the old spelling; the main branch stayed red after \pr{993} until \pr{1007}. Only the unit tests of one crate had been run locally before the merge.}
+
 \p{The review found that the first operation set could not rebuild a usable pointer from an address, that addresses were taken at the pointer size where the index width is required, that alignments above 2^31 were accepted and then dropped, that \code{\verb~|bool~} was accessed as a single bit, and that a record named after a builtin type did not survive a round trip through MIR text. All were fixed before the merges.}
 \p{\strong{Regression and fix.} The sigil change of \pr{987} broke the Ubuntu builds on the main branch: an OpenXLA-only test writes MIR by hand in the old spelling, and the local build has no OpenXLA, so the test never ran before the merge. \pr{993} fixes the two affected tests.}
 

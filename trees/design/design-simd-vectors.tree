@@ -7,12 +7,12 @@
 \tag{language}
 \tag{compiler}
 \tag{simd}
-\meta{status}{accepted}
+\meta{status}{implemented}
 \meta{updated}{2026-11-13}
 \meta{created}{2026-11-13}
 \import{base-macros}
 
-\p{\strong{Status:} accepted. Not implemented yet; the [patch plan](design-simd-vectors-plan) lists the order of work.}
+\p{\strong{Status:} implemented as a stack of draft pull requests, \pr{994} to \pr{1006}, not merged yet. The [patch plan](design-simd-vectors-plan) lists them, and what was left out and why.}
 \p{\code{\verb~|Simd<...>~} is a vector of lanes that the compiler lowers to the MLIR \code{\verb~|vector~} type and, from there, to LLVM vectors. It may have several dimensions, and its last dimension may be scalable, so that one source program runs on SSE, AVX-512, NEON, SVE and RVV. Every operation is predicated: it takes an optional mask of lanes, which is how loop tails and conditional updates are written. Vectors read and write memory through [opaque pointers](design-opaque-pointers).}
 \subtree[design-simd-vectors-prior]{
 \title{What other languages do}
@@ -99,7 +99,6 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \tr{\td{\code{\verb~|lanes<V>()~}}\td{Number of lanes as \code{\verb~|u64~}}\td{constant, or \code{\verb~|vector.vscale~} times a constant}}
 \tr{\td{\code{\verb~|extract(v, i...)~}}\td{A lane, or a sub-vector when fewer indices than dimensions are given. Only the index into the last dimension may be computed; the others are literals}\td{\code{\verb~|vector.extract~}}}
 \tr{\td{\code{\verb~|insert(v, x, i...)~}}\td{\code{\verb~|v~} with a lane or sub-vector replaced}\td{\code{\verb~|vector.insert~}}}
-\tr{\td{\code{\verb~|from_array(a)~}, \code{\verb~|to_array(v)~}}\td{Between a fixed vector and an array of the same shape}\td{\code{\verb~|vector.from_elements~}, \code{\verb~|vector.to_elements~}}}
 \tr{\td{\code{\verb~|add sub mul div rem neg~}}\td{Lanewise arithmetic; signedness from the element type}\td{\code{\verb~|arith~}}}
 \tr{\td{\code{\verb~|min max abs~}}\td{Lanewise}\td{\code{\verb~|arith~}, \code{\verb~|math~}}}
 \tr{\td{\code{\verb~|and or xor not shl shr~}}\td{Lanewise bit operations; also the mask operations}\td{\code{\verb~|arith~}}}
@@ -115,11 +114,10 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \tr{\td{\code{\verb~|shape_cast<V>(v)~}}\td{The same lanes in another shape}\td{\code{\verb~|vector.shape_cast~}}}
 \tr{\td{\code{\verb~|bitcast<V>(v)~}}\td{The same bits as other element types}\td{\code{\verb~|vector.bitcast~}}}
 \tr{\td{\code{\verb~|transpose(v, p)~}}\td{Dimensions permuted by the constant sequence \code{\verb~|p~}}\td{\code{\verb~|vector.transpose~}}}
-\tr{\td{\code{\verb~|shuffle<V>(a, b, i)~}}\td{Lanes picked by the constant sequence \code{\verb~|i~}; fixed only}\td{\code{\verb~|vector.shuffle~}}}
-\tr{\td{\code{\verb~|interleave(a, b)~}, \code{\verb~|deinterleave(v)~}}\td{Lanes alternated, and the reverse}\td{\code{\verb~|vector.interleave~}, \code{\verb~|vector.deinterleave~}}}
-\tr{\td{\code{\verb~|slice<V>(v, offsets, strides)~}, \code{\verb~|insert_slice(v, w, offsets, strides)~}}\td{Strided sub-vector; fixed only, positions as constant sequences}\td{\code{\verb~|vector.extract_strided_slice~}, \code{\verb~|vector.insert_strided_slice~}}}
+\tr{\td{\code{\verb~|shuffle(a, b, i)~}}\td{Lanes picked by the constant sequence \code{\verb~|i~}; fixed only}\td{\code{\verb~|vector.shuffle~}}}
+\tr{\td{\code{\verb~|interleave(a, b)~}, \code{\verb~|deinterleave_even(v)~}, \code{\verb~|deinterleave_odd(v)~}}\td{Lanes alternated, and every other lane. The reverse is two functions, because a pair of scalable vectors is not a value}\td{\code{\verb~|vector.interleave~}, \code{\verb~|vector.deinterleave~}}}
+\tr{\td{\code{\verb~|slice(v, offsets, sizes)~}, \code{\verb~|insert_slice(v, w, offsets)~}}\td{A part of a fixed vector; positions are constant sequences and strides are 1}\td{\code{\verb~|vector.extract_strided_slice~}, \code{\verb~|vector.insert_strided_slice~}}}
 \tr{\td{\code{\verb~|scalable_extract<V>(v, pos)~}, \code{\verb~|scalable_insert(v, w, pos)~}}\td{A fixed or scalable sub-vector of a scalable vector at a constant position}\td{\code{\verb~|vector.scalable.extract~}, \code{\verb~|vector.scalable.insert~}}}
-\tr{\td{\code{\verb~|print(v)~}}\td{Print the lanes; for tests}\td{\code{\verb~|vector.print~}}}
 }
 \ul{
 \li{Floating-point \code{\verb~|reduce_add~} and \code{\verb~|reduce_mul~} combine in lane order. \code{\verb~|reduce_add_reassoc~} and \code{\verb~|reduce_mul_reassoc~} allow any order, which is what lets a target reduce in parallel; they set the \code{\verb~|reassoc~} fast-math flag of \code{\verb~|vector.reduction~}.}
@@ -168,7 +166,7 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \tr{\td{\code{\verb~|outerproduct~}}\td{\code{\verb~|outer~}}}
 \tr{\td{\code{\verb~|maskedload~}, \code{\verb~|maskedstore~}, \code{\verb~|gather~}, \code{\verb~|scatter~}, \code{\verb~|expandload~}, \code{\verb~|compressstore~}}\td{\code{\verb~|load~}, \code{\verb~|store~}, \code{\verb~|gather~}, \code{\verb~|scatter~}, \code{\verb~|load_expand~}, \code{\verb~|store_compress~} of \code{\verb~|core::simd~}, over pointers}}
 \tr{\td{\code{\verb~|load~}, \code{\verb~|store~}}\td{\code{\verb~|ptr::load~}, \code{\verb~|ptr::store~} with a vector type}}
-\tr{\td{\code{\verb~|print~}}\td{\code{\verb~|print~}}}
+\tr{\td{\code{\verb~|print~}}\td{not exposed: it lowers to calls into the MLIR runner utilities}}
 \tr{\td{\code{\verb~|contract~}}\td{deferred; see [prob-Y593](prob-Y593)}}
 \tr{\td{\code{\verb~|transfer_read~}, \code{\verb~|transfer_write~}, \code{\verb~|type_cast~}}\td{not exposed: they work on memrefs and tensors}}
 }
@@ -215,7 +213,7 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 
 \p{A stack of pull requests of about 300 changed lines each, tests included. Each one is usable on its own and leaves the textual IR round trip complete.}
 
-\p{\strong{Progress.} Patches 1 to 8 are open as drafts: \pr{994}, \pr{995}, \pr{996}, \pr{997}, \pr{998}, \pr{999}, \pr{1000} and \pr{1001}.}
+\p{\strong{Progress.} All patches are open as drafts, each on top of the one before: \pr{994}, \pr{995}, \pr{996}, \pr{997}, \pr{998}, \pr{999}, \pr{1000}, \pr{1001}, \pr{1002}, \pr{1003}, \pr{1004}, \pr{1005} and \pr{1006}. Patch 13 was dropped: \code{\verb~|from_array~} and \code{\verb~|to_array~} are a pointer load or store through \code{\verb~|array::unsafe_data_ptr~}, and \code{\verb~|vector.print~} lowers to calls into the MLIR runner utilities, which the Reussir runtime does not ship.}
 \table{
 \tr{\th{#}\th{Title}\th{Contents}}
 \tr{\td{1}\td{\code{\verb~|[conversion]~} the \code{\verb~|vector~} dialect lowers through the pipeline}\td{Its conversion in \code{\verb~|reussir-convert-to-llvm~} and \code{\verb~|convert-to-llvm~}, with the SVE options on AArch64; lit tests for fixed, n-D and trailing-scalable shapes.}}

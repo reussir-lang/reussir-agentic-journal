@@ -37,4 +37,4 @@ pub fn dot(a: Vec<f32>, b: Vec<f32>) -> f32 {
 \li{\code{\verb~|fma(x, y, acc, live)~} computes \code{\verb~|x * y + acc~}. Its masked lanes keep the first operand, so the argument order that keeps the accumulator in the tail has to be settled when \code{\verb~|fma~} is specified; passing zeros as the pass-through of both loads makes the tail lanes add zero either way.}
 \li{The lanes are summed in lane order. Allowing reassociation in \code{\verb~|reduce_add~} is what lets the target use its fastest reduction.}
 }
-\p{Belongs to [SIMD vectors](design-simd-vectors). Written against the draft; not compiled.}
+\p{Belongs to [SIMD vectors](design-simd-vectors). A fixed-vector form of it runs in the standard library tests, \pr{1006}.}
