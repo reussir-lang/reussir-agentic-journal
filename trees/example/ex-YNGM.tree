@@ -1,0 +1,37 @@
+\title{Count lines in a \code{\verb~|Text~} with fixed vectors}
+\taxon{Example}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{simd}
+\tag{example}
+\import{base-macros}
+
+\p{A count over 32-byte chunks. Each chunk yields a mask, and the number of set lanes is added to a scalar. A \code{\verb~|Text~} is either a literal or an owned string; its data pointer hides the difference.}
+\pre{\verb~|
+import core::ptr;
+import core::simd;
+import core::ptr::PtrArithFlag;
+import std::text::Text;
+
+pub fn lines(t: Text) -> u64 {
+    let len = t.len();
+    core::object::unsafe_inc(t);
+    let base = t.unsafe_data_ptr();
+    let newline = simd::splat<Simd<[u8; 32]>>(10);
+    let zero = simd::splat<Simd<[u8; 32]>>(0);
+    let (end, total) = while [i = 0, total = 0] (i < len) {
+        let live = simd::mask_first<Simd<[bool; 32]>>(len - i);
+        let chunk = simd::load<Simd<[u8; 32]>>(
+            ptr::offset(base, i as i64, PtrArithFlag::Inbounds), live, zero);
+        (i + 32, total + simd::count(simd::eq(chunk, newline, live)))
+    };
+    core::object::unsafe_dec(t);
+    total
+}
+~}
+\ul{
+\li{The same source works with \code{\verb~|Simd<[u8; [16]]>~} and a step of \code{\verb~|lanes~}; the fixed form is shown because a fixed vector may also be kept in a record, for example as a precomputed table.}
+\li{A faster variant keeps a vector of per-lane counters and reduces it once at the end; it needs a flush every 255 iterations when the counters are bytes.}
+}
+\p{Belongs to [SIMD vectors](design-simd-vectors). Written against the draft; not compiled.}

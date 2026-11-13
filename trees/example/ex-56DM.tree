@@ -1,0 +1,49 @@
+\title{Running sum with \code{\verb~|scan~}, and a matrix product in two dimensions}
+\taxon{Example}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{simd}
+\tag{example}
+\import{base-macros}
+
+\p{Two uses of the less common operations. The first carries the last value of each chunk into the next. The second treats a 4 by 4 matrix as a two-dimensional vector.}
+\pre{\verb~|
+import core::ptr;
+import core::simd;
+import core::ptr::PtrArithFlag;
+import std::collections::cow::vec::Vec;
+
+// Write the running sums of `src` to `dst`, which has room for as many.
+pub fn prefix_sums(src: Vec<i32>, dst: Ptr<core::ptr::Generic>) -> i32 {
+    let len = src.len();
+    core::object::unsafe_inc(src);
+    let base = src.unsafe_data_ptr();
+    let zero = simd::splat<Simd<[i32; 8]>>(0);
+    let (end, carry) = while [i = 0, carry = 0] (i < len) {
+        let live = simd::mask_first<Simd<[bool; 8]>>(len - i);
+        let x = simd::load<Simd<[i32; 8]>>(ptr::advance<i32>(base, i as i64, PtrArithFlag::Inbounds), live, zero);
+        let (sums, last) = simd::scan_add(x, carry, 0, true);
+        simd::store(ptr::advance<i32>(dst, i as i64, PtrArithFlag::Inbounds), sums, live);
+        (i + 8, last)
+    };
+    core::object::unsafe_dec(src);
+    carry
+}
+
+// Row i of the result is the sum over k of a[i][k] * b[k].
+pub fn matmul(a: Simd<[f32; 4, 4]>, b: Simd<[f32; 4, 4]>) -> Simd<[f32; 4, 4]> {
+    let (k, out) = while [k = 0, out = simd::splat<Simd<[f32; 4, 4]>>(0.0)] (k < 4) {
+        let column = simd::extract(simd::transpose(a, 1, 0), k);
+        let row = simd::extract(b, k);
+        (k + 1, simd::add(out, simd::outer(column, row)))
+    };
+    out
+}
+~}
+\ul{
+\li{\code{\verb~|scan_add(x, carry, 0, true)~} starts from \code{\verb~|carry~} and includes each lane in its own sum. In the last chunk the masked lanes were loaded as zero, so \code{\verb~|last~} is still the total.}
+\li{The matrix product adds four outer products. \code{\verb~|vector.contract~} would say it in one operation; whether to expose that is an open question of the design.}
+\li{A fixed two-dimensional vector such as \code{\verb~|Simd<[f32; 4, 4]>~} can be a record field, so a transform can be stored and passed around like any value.}
+}
+\p{Belongs to [SIMD vectors](design-simd-vectors). Written against the draft; not compiled.}

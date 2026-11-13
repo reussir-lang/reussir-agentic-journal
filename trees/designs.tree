@@ -22,6 +22,7 @@
 \transclude{design-rri}
 \transclude{design-stablehlo-async-types}
 \transclude{design-stablehlo-build}
+\transclude{design-simd-vectors}
 \transclude{design-str}
 \transclude{design-system-rust-runtime}
 \transclude{design-tensor-kernels}

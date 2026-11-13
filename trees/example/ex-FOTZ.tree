@@ -1,0 +1,42 @@
+\title{Find a byte in a \code{\verb~|String~} with scalable vectors}
+\taxon{Example}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{simd}
+\tag{example}
+\import{base-macros}
+
+\p{The \code{\verb~|memchr~} loop of SVE and RVV: one loop, no scalar remainder. The string is pinned while only its data pointer is in use.}
+\pre{\verb~|
+import core::ptr;
+import core::simd;
+import core::ptr::PtrArithFlag;
+import std::string::String;
+
+// The index of the first `needle` in `s`, or the length of `s`.
+pub fn find(s: String, needle: u8) -> u64 {
+    let len = s.len();
+    core::object::unsafe_inc(s);
+    let base = s.unsafe_data_ptr();
+    let width = simd::lanes<Simd<[u8; [16]]>>();
+    let wanted = simd::splat<Simd<[u8; [16]]>>(needle);
+    let zero = simd::splat<Simd<[u8; [16]]>>(0);
+    let (at, hit) = while [i = 0, hit = len] (i < len && hit == len) {
+        let live = simd::mask_first<Simd<[bool; [16]]>>(len - i);
+        let chunk = simd::load<Simd<[u8; [16]]>>(
+            ptr::offset(base, i as i64, PtrArithFlag::Inbounds), live, zero);
+        let found = simd::eq(chunk, wanted, live);
+        let here = if simd::any(found) { i + simd::first_set(found) } else { len };
+        (i + width, here)
+    };
+    core::object::unsafe_dec(s);
+    hit
+}
+~}
+\ul{
+\li{\code{\verb~|mask_first(len - i)~} covers the whole vector until the last iteration and only the remaining bytes there, so nothing is read past the end.}
+\li{The comparison takes the mask too, so the padding lanes of the last chunk cannot match.}
+\li{\code{\verb~|unsafe_inc~} and \code{\verb~|unsafe_dec~} bracket the region where the buffer is reachable only through \code{\verb~|base~}. Without them the string may be released after \code{\verb~|s.unsafe_data_ptr()~}, its last ordinary use.}
+}
+\p{Belongs to [SIMD vectors](design-simd-vectors). Written against the draft; not compiled.}

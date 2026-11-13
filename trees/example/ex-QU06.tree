@@ -1,0 +1,40 @@
+\title{Dot product of two \code{\verb~|Vec<f32>~} with a vector accumulator}
+\taxon{Example}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{simd}
+\tag{example}
+\import{base-macros}
+
+\p{The accumulator is a scalable vector carried as loop state, which is one of the places a scalable value may live. The reduction happens once, after the loop.}
+\pre{\verb~|
+import core::ptr;
+import core::simd;
+import core::ptr::PtrArithFlag;
+import std::collections::cow::vec::Vec;
+
+pub fn dot(a: Vec<f32>, b: Vec<f32>) -> f32 {
+    let len = if a.len() < b.len() { a.len() } else { b.len() };
+    core::object::unsafe_inc(a);
+    core::object::unsafe_inc(b);
+    let pa = a.unsafe_data_ptr();
+    let pb = b.unsafe_data_ptr();
+    let width = simd::lanes<Simd<[f32; [4]]>>();
+    let zero = simd::splat<Simd<[f32; [4]]>>(0.0);
+    let (end, acc) = while [i = 0, acc = zero] (i < len) {
+        let live = simd::mask_first<Simd<[bool; [4]]>>(len - i);
+        let x = simd::load<Simd<[f32; [4]]>>(ptr::advance<f32>(pa, i as i64, PtrArithFlag::Inbounds), live, zero);
+        let y = simd::load<Simd<[f32; [4]]>>(ptr::advance<f32>(pb, i as i64, PtrArithFlag::Inbounds), live, zero);
+        (i + width, simd::fma(x, y, acc, live))
+    };
+    core::object::unsafe_dec(a);
+    core::object::unsafe_dec(b);
+    simd::reduce_add(acc)
+}
+~}
+\ul{
+\li{\code{\verb~|fma(x, y, acc, live)~} computes \code{\verb~|x * y + acc~}. Its masked lanes keep the first operand, so the argument order that keeps the accumulator in the tail has to be settled when \code{\verb~|fma~} is specified; passing zeros as the pass-through of both loads makes the tail lanes add zero either way.}
+\li{The lanes are summed in lane order. Allowing reassociation in \code{\verb~|reduce_add~} is what lets the target use its fastest reduction.}
+}
+\p{Belongs to [SIMD vectors](design-simd-vectors). Written against the draft; not compiled.}

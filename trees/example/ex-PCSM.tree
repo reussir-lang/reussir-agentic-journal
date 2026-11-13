@@ -1,0 +1,47 @@
+\title{Clamp the elements of an array in place when it is not shared}
+\taxon{Example}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{simd}
+\tag{example}
+\import{base-macros}
+
+\p{A scan that writes. The array is updated through its data pointer only when \code{\verb~|is_unique~} says nobody else can observe the write; otherwise the ordinary copy-on-write path runs.}
+\pre{\verb~|
+import core::intrinsic::array;
+import core::ptr;
+import core::simd;
+import core::ptr::PtrArithFlag;
+
+pub fn clamp(a: [f32; ?], limit: f32) -> [f32; ?] {
+    let len = array::dim(a, 0);
+    if core::object::is_unique(a) {
+        let base = ptr::as_mut(array::unsafe_data_ptr(a));
+        let top = simd::splat<Simd<[f32; [4]]>>(limit);
+        let width = simd::lanes<Simd<[f32; [4]]>>();
+        let end = while [i = 0] (i < len) {
+            let live = simd::mask_first<Simd<[bool; [4]]>>(len - i);
+            let at = ptr::advance<f32>(base, i as i64, PtrArithFlag::Inbounds);
+            let x = simd::load<Simd<[f32; [4]]>>(at, live, top);
+            simd::store(at, top, simd::gt(x, top, live));
+            i + width
+        };
+        a
+    } else {
+        clamp_copy(a, limit, 0)
+    }
+}
+
+fn clamp_copy(a: [f32; ?], limit: f32, i: i64) -> [f32; ?] {
+    if (i as u64) >= array::dim(a, 0) { a }
+    else if array::get(a, i) > limit { clamp_copy(array::set(a, i, limit), limit, i + 1) }
+    else { clamp_copy(a, limit, i + 1) }
+}
+~}
+\ul{
+\li{The array stays alive without \code{\verb~|unsafe_inc~} because it is returned: its last use comes after the loop.}
+\li{The store is masked by the comparison, so only the elements above the limit are written. No blend is needed.}
+\li{\code{\verb~|as_mut~} is where the program takes responsibility for writing through a pointer that was handed out read-only.}
+}
+\p{Belongs to [SIMD vectors](design-simd-vectors). Written against the draft; not compiled.}

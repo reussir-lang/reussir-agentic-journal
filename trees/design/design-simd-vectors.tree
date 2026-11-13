@@ -1,0 +1,221 @@
+\title{SIMD vectors}
+\taxon{Design}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{design}
+\tag{language}
+\tag{compiler}
+\tag{simd}
+\meta{status}{draft}
+\meta{created}{2026-11-13}
+\import{base-macros}
+
+\p{\strong{Status:} draft. Nothing here is implemented; the [patch plan](design-simd-vectors-plan) lists the order of work.}
+\p{\code{\verb~|Simd<...>~} is a vector of lanes that the compiler lowers to the MLIR \code{\verb~|vector~} type and, from there, to LLVM vectors. It may have several dimensions, and its last dimension may be scalable, so that one source program runs on SSE, AVX-512, NEON, SVE and RVV. Every operation is predicated: it takes an optional mask of lanes, which is how loop tails and conditional updates are written. Vectors read and write memory through [opaque pointers](design-opaque-pointers).}
+\subtree[design-simd-vectors-prior]{
+\title{What other languages do}
+
+\table{
+\tr{\th{}\th{Rust \code{\verb~|std::simd~}}\th{JDK Vector API}\th{C++26 \code{\verb~|std::simd~}}\th{Here}}
+\tr{\td{Lane count}\td{Const generic \code{\verb~|N~}, fixed}\td{\code{\verb~|VectorSpecies~}, fixed per shape, chosen at run time by \code{\verb~|SPECIES_PREFERRED~}}\td{Template argument or native ABI width, fixed}\td{In the type; fixed or a multiple of \code{\verb~|vscale~}}}
+\tr{\td{Scalable}\td{No}\td{No; widest shape picked at run time}\td{No}\td{Yes, last dimension}}
+\tr{\td{Several dimensions}\td{No}\td{No}\td{No}\td{Yes, as MLIR has them}}
+\tr{\td{Mask type}\td{\code{\verb~|Mask<T, N>~}}\td{\code{\verb~|VectorMask<E>~}}\td{A mask class per vector type}\td{\code{\verb~|Simd<[bool; ...]>~}}}
+\tr{\td{Masked arithmetic}\td{No; \code{\verb~|mask.select(a, b)~} after the fact}\td{Every lanewise operation and reduction has a masked overload}\td{\code{\verb~|select~}, and masked reductions}\td{Optional trailing mask on every operation}}
+\tr{\td{Loop tail}\td{Scalar remainder or a padded copy}\td{\code{\verb~|species.indexInRange(i, n)~} gives the mask}\td{Partial loads}\td{\code{\verb~|mask_first(n - i)~}}}
+\tr{\td{Masked memory}\td{Masked load, store, gather, scatter}\td{Masked load and store; \code{\verb~|compress~} and \code{\verb~|expand~}}\td{Partial and masked load and store}\td{Masked load, store, gather, scatter, expand, compress}}
+}
+\ul{
+\li{Rust keeps masks apart from predication: operations always run on all lanes and \code{\verb~|select~} merges afterwards. That is enough on fixed widths and cannot express a scalable loop tail.}
+\li{The JDK model is the one followed here. A mask is an optional argument of each operation, and lanes that are masked off keep the value of the first operand. It maps directly to merging predication in SVE and AVX-512.}
+\li{The loop written for SVE and RVV has no scalar remainder: the last iteration runs under a mask that covers the lanes left over. \code{\verb~|mask_first~} is that mask.}
+}
+}
+
+\subtree[design-simd-vectors-type]{
+\title{The type}
+
+\pre{\verb~|
+Simd<[i8; 16]>            // 16 lanes                      vector<16xi8>
+Simd<[f32; 4, 4]>         // 4 rows of 4 lanes             vector<4x4xf32>
+Simd<[i8; [16]]>          // 16 * vscale lanes             vector<[16]xi8>
+Simd<[f32; 2, [4]]>       // 2 rows of 4 * vscale lanes    vector<2x[4]xf32>
+Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
+~}
+\ul{
+\li{The argument is written as an array type: element first, then one extent per dimension. An extent in brackets is scalable: \code{\verb~|[n]~} means \code{\verb~|n * vscale~} lanes, where \code{\verb~|vscale~} is a positive constant of the machine known only at run time.}
+\li{Elements are the fixed-width integers, \code{\verb~|f32~}, \code{\verb~|f64~} and \code{\verb~|bool~}. A vector of \code{\verb~|bool~} is a mask and lowers to a vector of \code{\verb~|i1~}.}
+\li{There is at least one dimension, every extent is positive, and the total number of fixed lanes is bounded.}
+\li{\strong{Only the last extent may be scalable.} MLIR accepts a scalable extent anywhere, but the conversion to LLVM turns an n-D vector into nested arrays of 1-D vectors, and LLVM has scalable vectors only in one dimension. Checked with the project tools on LLVM 23.1: \code{\verb~|vector<2x[4]xf32>~} becomes an array of two \code{\verb~|<vscale x 4 x float>~} and \code{\verb~|vector<[2]x4xf32>~} is left unconverted. \code{\verb~|Simd<[i8; [16], 8, 16]>~} is therefore rejected and written \code{\verb~|Simd<[i8; 16, 8, [16]]>~}. Two scalable dimensions exist only for Arm SME tiles and are out of scope.}
+\li{A vector is a plain value: not reference counted, \code{\verb~|Sync~}, compared lane by lane through intrinsics and not through \code{\verb~|PartialEq~}, because a comparison yields a mask.}
+}
+\subtree[design-simd-vectors-materialize]{
+\title{Fixed vectors can be stored; scalable ones cannot}
+
+\p{The size of a scalable vector is not known when the program is compiled, so it has no place in a layout.}
+\table{
+\tr{\th{Use}\th{Fixed}\th{Scalable}}
+\tr{\td{Parameter, result, \code{\verb~|let~}, loop state}\td{yes}\td{yes}}
+\tr{\td{Record field, enum payload, array element}\td{yes}\td{no}}
+\tr{\td{Closure capture, tuple component}\td{yes}\td{no}}
+\tr{\td{Type argument of a generic record or function}\td{yes}\td{no, except the \code{\verb~|core::simd~} and \code{\verb~|core::ptr~} operations}}
+\tr{\td{\code{\verb~|ptr::load~}, \code{\verb~|ptr::store~}, \code{\verb~|simd::load~}, \code{\verb~|simd::store~}}\td{yes}\td{yes}}
+\tr{\td{\code{\verb~|ptr::type_offset~}, \code{\verb~|ptr::advance~}}\td{yes}\td{yes; the size is a run-time value}}
+\tr{\td{Foreign function boundary}\td{no, at first}\td{no}}
+}
+\p{The rule is checked where a type is used, as the pointee rule of pointers is, and again when a generic function is instantiated. A scalable vector is read from and written to memory by the operations themselves; what is forbidden is an object whose layout contains one.}
+}
+
+}
+
+\subtree[design-simd-vectors-predication]{
+\title{Predication}
+
+\ul{
+\li{Every lanewise operation, comparison and reduction takes an optional last argument, a mask of the same shape. Without it all lanes take part.}
+\li{A lane that is masked off in a lanewise operation keeps the lane of the first operand. In a comparison it is false. In a reduction it does not contribute. Zeroing instead of merging is \code{\verb~|select(m, op(a, b), splat(0))~}.}
+\li{A masked lane never traps and never touches memory. Integer division and remainder replace the divisor of masked lanes by one before dividing.}
+\li{Lowering does not use \code{\verb~|vector.mask~}: upstream lowers that region for a few operations only. A pure lanewise operation becomes the operation followed by \code{\verb~|arith.select~}; a reduction selects the identity of its kind first; memory operations use the masked LLVM intrinsics. Instruction selection turns the select into merging predication where the target has it.}
+\li{Masks are built by comparisons, by \code{\verb~|mask_first<M>(n)~}, whose first \code{\verb~|n~} lanes are set (\code{\verb~|vector.create_mask~}), and by \code{\verb~|mask_const<M>(n...)~} (\code{\verb~|vector.constant_mask~}). They combine with \code{\verb~|and~}, \code{\verb~|or~}, \code{\verb~|xor~} and \code{\verb~|not~}.}
+}
+}
+
+\subtree[design-simd-vectors-ops]{
+\title{Operations on values}
+
+\p{The operations are intrinsics of \code{\verb~|core::simd~}, declared there as lang items like those of \code{\verb~|core::ptr~}. \code{\verb~|V~} is a vector type and \code{\verb~|M~} a mask type. Arguments described as constant are part of the operation and are printed as its immediate in HIR and MIR.}
+\table{
+\tr{\th{Operation}\th{Meaning}\th{MLIR}}
+\tr{\td{\code{\verb~|splat<V>(x)~}}\td{Every lane is \code{\verb~|x~}}\td{\code{\verb~|vector.broadcast~}}}
+\tr{\td{\code{\verb~|broadcast<V>(v)~}}\td{A vector repeated along new leading dimensions}\td{\code{\verb~|vector.broadcast~}}}
+\tr{\td{\code{\verb~|from_elements<V>(x...)~}}\td{One argument per lane; fixed only}\td{\code{\verb~|vector.from_elements~}}}
+\tr{\td{\code{\verb~|step<V>()~}}\td{Lanes 0, 1, 2, ...; one dimension}\td{\code{\verb~|vector.step~}}}
+\tr{\td{\code{\verb~|lanes<V>()~}}\td{Number of lanes as \code{\verb~|u64~}}\td{constant, or \code{\verb~|vector.vscale~} times a constant}}
+\tr{\td{\code{\verb~|extract(v, i...)~}}\td{A lane, or a sub-vector when fewer indices than dimensions are given}\td{\code{\verb~|vector.extract~}}}
+\tr{\td{\code{\verb~|insert(v, x, i...)~}}\td{\code{\verb~|v~} with a lane or sub-vector replaced}\td{\code{\verb~|vector.insert~}}}
+\tr{\td{\code{\verb~|from_array(a)~}, \code{\verb~|to_array(v)~}}\td{Between a fixed vector and an array of the same shape}\td{\code{\verb~|vector.from_elements~}, \code{\verb~|vector.to_elements~}}}
+\tr{\td{\code{\verb~|add sub mul div rem neg~}}\td{Lanewise arithmetic; signedness from the element type}\td{\code{\verb~|arith~}}}
+\tr{\td{\code{\verb~|min max abs~}}\td{Lanewise}\td{\code{\verb~|arith~}, \code{\verb~|math~}}}
+\tr{\td{\code{\verb~|and or xor not shl shr~}}\td{Lanewise bit operations; also the mask operations}\td{\code{\verb~|arith~}}}
+\tr{\td{\code{\verb~|fma(a, b, c)~} and the \code{\verb~|core::intrinsic::math~} functions}\td{Lanewise on floating-point vectors}\td{\code{\verb~|math~}}}
+\tr{\td{\code{\verb~|eq ne lt le gt ge~}}\td{Lanewise comparison; the result is a mask}\td{\code{\verb~|arith.cmpi~}, \code{\verb~|arith.cmpf~}}}
+\tr{\td{\code{\verb~|select(m, a, b)~}}\td{\code{\verb~|a~} where the mask is set, else \code{\verb~|b~}}\td{\code{\verb~|arith.select~}}}
+\tr{\td{\code{\verb~|mask_first<M>(n)~}}\td{The first \code{\verb~|n~} lanes are set}\td{\code{\verb~|vector.create_mask~}}}
+\tr{\td{\code{\verb~|mask_const<M>(n...)~}}\td{The same with constants, one per dimension}\td{\code{\verb~|vector.constant_mask~}}}
+\tr{\td{\code{\verb~|any(m)~}, \code{\verb~|all(m)~}}\td{Whether some or every lane is set}\td{\code{\verb~|vector.reduction~} with \code{\verb~|or~}, \code{\verb~|and~}}}
+\tr{\td{\code{\verb~|count(m)~}}\td{Number of set lanes}\td{extend, then \code{\verb~|vector.reduction~} with \code{\verb~|add~}}}
+\tr{\td{\code{\verb~|first_set(m)~}}\td{Index of the first set lane, or \code{\verb~|lanes~} if none; one dimension}\td{\code{\verb~|vector.step~}, \code{\verb~|arith.select~}, \code{\verb~|vector.reduction~} with \code{\verb~|minui~}}}
+\tr{\td{\code{\verb~|reduce_add reduce_mul reduce_min reduce_max reduce_and reduce_or reduce_xor~}}\td{All lanes combined into a scalar}\td{\code{\verb~|vector.reduction~}}}
+\tr{\td{\code{\verb~|reduce_dims_<kind>(v, d...)~}}\td{The constant dimensions \code{\verb~|d~} combined away}\td{\code{\verb~|vector.multi_reduction~}}}
+\tr{\td{\code{\verb~|scan_<kind>(v, init, d, inclusive)~}}\td{Running combination along dimension \code{\verb~|d~}; returns the vector and the last value}\td{\code{\verb~|vector.scan~}}}
+\tr{\td{\code{\verb~|outer(a, b)~}}\td{Outer product of two 1-D vectors, optionally added to a third}\td{\code{\verb~|vector.outerproduct~}}}
+\tr{\td{\code{\verb~|shape_cast<V>(v)~}}\td{The same lanes in another shape}\td{\code{\verb~|vector.shape_cast~}}}
+\tr{\td{\code{\verb~|bitcast<V>(v)~}}\td{The same bits as other element types}\td{\code{\verb~|vector.bitcast~}}}
+\tr{\td{\code{\verb~|transpose(v, p...)~}}\td{Dimensions permuted by the constant \code{\verb~|p~}}\td{\code{\verb~|vector.transpose~}}}
+\tr{\td{\code{\verb~|shuffle<V>(a, b, i...)~}}\td{Lanes picked by constant indices; fixed only}\td{\code{\verb~|vector.shuffle~}}}
+\tr{\td{\code{\verb~|interleave(a, b)~}, \code{\verb~|deinterleave(v)~}}\td{Lanes alternated, and the reverse}\td{\code{\verb~|vector.interleave~}, \code{\verb~|vector.deinterleave~}}}
+\tr{\td{\code{\verb~|slice<V>(v, offsets, strides)~}, \code{\verb~|insert_slice(v, w, offsets, strides)~}}\td{Strided sub-vector; fixed only, constant positions}\td{\code{\verb~|vector.extract_strided_slice~}, \code{\verb~|vector.insert_strided_slice~}}}
+\tr{\td{\code{\verb~|scalable_extract<V>(v, pos)~}, \code{\verb~|scalable_insert(v, w, pos)~}}\td{A fixed or scalable sub-vector of a scalable vector at a constant position}\td{\code{\verb~|vector.scalable.extract~}, \code{\verb~|vector.scalable.insert~}}}
+\tr{\td{\code{\verb~|print(v)~}}\td{Print the lanes; for tests}\td{\code{\verb~|vector.print~}}}
+}
+\ul{
+\li{Floating-point \code{\verb~|reduce_add~} and \code{\verb~|reduce_mul~} combine in lane order by default. A constant flag allows reassociation, which is what makes the reduction fast; it is the fast-math flag of \code{\verb~|vector.reduction~}.}
+\li{\code{\verb~|reduce_min~} and \code{\verb~|reduce_max~} on floating-point use the \code{\verb~|minnumf~} and \code{\verb~|maxnumf~} kinds, which ignore a NaN lane, as the scalar \code{\verb~|min~} and \code{\verb~|max~} of \code{\verb~|core::intrinsic::math~} do.}
+\li{Whether \code{\verb~|+~}, \code{\verb~|-~}, \code{\verb~|*~}, \code{\verb~|&~} and the other operators also work on vectors is an [open question](design-simd-vectors-open).}
+}
+}
+
+\subtree[design-simd-vectors-memory]{
+\title{Memory}
+
+\table{
+\tr{\th{Operation}\th{Meaning}\th{Lowering}}
+\tr{\td{\code{\verb~|ptr::load<V>(p)~}, \code{\verb~|ptr::store(p, v)~}}\td{All lanes, contiguous}\td{\code{\verb~|ptr.load~}, \code{\verb~|ptr.store~}}}
+\tr{\td{\code{\verb~|simd::load<V>(p, m, passthru)~}}\td{Masked lanes are not read and take \code{\verb~|passthru~}}\td{\code{\verb~|llvm.masked.load~}}}
+\tr{\td{\code{\verb~|simd::store(p, v, m)~}}\td{Masked lanes are not written}\td{\code{\verb~|llvm.masked.store~}}}
+\tr{\td{\code{\verb~|simd::gather<V>(base, index, m, passthru)~}}\td{Lane \code{\verb~|i~} reads the element \code{\verb~|index[i]~} after \code{\verb~|base~}}\td{\code{\verb~|llvm.masked.gather~}}}
+\tr{\td{\code{\verb~|simd::scatter(base, index, v, m)~}}\td{Lane \code{\verb~|i~} writes there}\td{\code{\verb~|llvm.masked.scatter~}}}
+\tr{\td{\code{\verb~|simd::load_expand<V>(p, m, passthru)~}}\td{Consecutive elements go to the set lanes}\td{\code{\verb~|llvm.masked.expandload~}}}
+\tr{\td{\code{\verb~|simd::store_compress(p, v, m)~}}\td{The set lanes are written consecutively}\td{\code{\verb~|llvm.masked.compressstore~}}}
+}
+\ul{
+\li{A vector is a legal accessed type of \code{\verb~|ptr::load~}, \code{\verb~|ptr::store~}, \code{\verb~|ptr::type_offset~} and \code{\verb~|ptr::advance~}. \code{\verb~|advance<V>(p, 1, flag)~} steps one vector ahead; for a scalable \code{\verb~|V~} the step is \code{\verb~|lanes<V>()~} elements.}
+\li{Accesses are unaligned to the vector and aligned to the element unless \code{\verb~|load_extended~} or \code{\verb~|store_extended~} says otherwise.}
+\li{A mask in memory is one byte per lane, as a \code{\verb~|bool~} is. Loading a mask loads bytes and compares them with zero.}
+\li{The memory operations of the \code{\verb~|vector~} dialect take a \code{\verb~|memref~}, and a pointer has no shape to make one from. The six masked forms are therefore operations of the Reussir dialect under \code{\verb~|reussir.ptr~}, converted to the LLVM dialect intrinsics, which the LLVM dialect already has. \code{\verb~|vector.transfer_read~}, \code{\verb~|vector.transfer_write~} and \code{\verb~|vector.type_cast~} are views of memrefs and tensors and are not exposed.}
+\li{A multi-dimensional vector in memory is its lanes in row-major order with no padding between rows.}
+}
+}
+
+\subtree[design-simd-vectors-coverage]{
+\title{Coverage of the \code{\verb~|vector~} dialect}
+
+\table{
+\tr{\th{Dialect operation}\th{Exposed as}}
+\tr{\td{\code{\verb~|broadcast~}, \code{\verb~|from_elements~}, \code{\verb~|to_elements~}, \code{\verb~|step~}, \code{\verb~|vscale~}}\td{\code{\verb~|splat~}, \code{\verb~|broadcast~}, \code{\verb~|from_elements~}, \code{\verb~|from_array~}, \code{\verb~|to_array~}, \code{\verb~|step~}, \code{\verb~|lanes~}}}
+\tr{\td{\code{\verb~|extract~}, \code{\verb~|insert~}}\td{\code{\verb~|extract~}, \code{\verb~|insert~}}}
+\tr{\td{\code{\verb~|shuffle~}, \code{\verb~|interleave~}, \code{\verb~|deinterleave~}}\td{the same names}}
+\tr{\td{\code{\verb~|extract_strided_slice~}, \code{\verb~|insert_strided_slice~}}\td{\code{\verb~|slice~}, \code{\verb~|insert_slice~}}}
+\tr{\td{\code{\verb~|scalable.extract~}, \code{\verb~|scalable.insert~}}\td{\code{\verb~|scalable_extract~}, \code{\verb~|scalable_insert~}}}
+\tr{\td{\code{\verb~|shape_cast~}, \code{\verb~|bitcast~}, \code{\verb~|transpose~}}\td{the same names}}
+\tr{\td{\code{\verb~|create_mask~}, \code{\verb~|constant_mask~}}\td{\code{\verb~|mask_first~}, \code{\verb~|mask_const~}}}
+\tr{\td{\code{\verb~|mask~}, \code{\verb~|yield~}}\td{the optional mask argument of every operation}}
+\tr{\td{\code{\verb~|reduction~}, \code{\verb~|multi_reduction~}, \code{\verb~|scan~}}\td{\code{\verb~|reduce_<kind>~}, \code{\verb~|reduce_dims_<kind>~}, \code{\verb~|scan_<kind>~}}}
+\tr{\td{\code{\verb~|outerproduct~}}\td{\code{\verb~|outer~}}}
+\tr{\td{\code{\verb~|maskedload~}, \code{\verb~|maskedstore~}, \code{\verb~|gather~}, \code{\verb~|scatter~}, \code{\verb~|expandload~}, \code{\verb~|compressstore~}}\td{\code{\verb~|load~}, \code{\verb~|store~}, \code{\verb~|gather~}, \code{\verb~|scatter~}, \code{\verb~|load_expand~}, \code{\verb~|store_compress~} of \code{\verb~|core::simd~}, over pointers}}
+\tr{\td{\code{\verb~|load~}, \code{\verb~|store~}}\td{\code{\verb~|ptr::load~}, \code{\verb~|ptr::store~} with a vector type}}
+\tr{\td{\code{\verb~|print~}}\td{\code{\verb~|print~}}}
+\tr{\td{\code{\verb~|contract~}}\td{not at first; see [open questions](design-simd-vectors-open)}}
+\tr{\td{\code{\verb~|transfer_read~}, \code{\verb~|transfer_write~}, \code{\verb~|type_cast~}}\td{not exposed: they work on memrefs and tensors}}
+}
+}
+
+\subtree[design-simd-vectors-examples]{
+\title{Examples}
+
+\p{Each example pins its container with \code{\verb~|core::object::unsafe_inc~}, scans it through its data pointer, and releases it. They are written against this draft and have not been compiled.}
+\transclude{ex-FOTZ}
+\transclude{ex-YNGM}
+\transclude{ex-QU06}
+\transclude{ex-PCSM}
+\transclude{ex-56DM}
+}
+
+\subtree[design-simd-vectors-open]{
+\title{Open questions}
+
+\ol{
+\li{\strong{Operators.} Should \code{\verb~|a + b~} work on vectors, or only \code{\verb~|simd::add(a, b)~}? Operators read better; the builtin numeric traits would have to admit vectors, and a masked form still needs the function.}
+\li{\strong{\code{\verb~|contract~}.} \code{\verb~|vector.contract~} takes indexing maps and iterator types. A general surface for it is large. Fixed forms such as \code{\verb~|dot~} and \code{\verb~|matmul~} could be offered instead, or it can wait.}
+\li{\strong{Element types.} \code{\verb~|f16~}, \code{\verb~|bf16~}, \code{\verb~|i128~} and \code{\verb~|char~} lanes are left out. Vectors of pointers are left out; \code{\verb~|gather~} takes a base pointer and an index vector.}
+\li{\strong{Foreign functions.} Passing a fixed vector to C or Rust depends on the target features of both sides. Left out at first.}
+\li{\strong{Vector length at run time.} A scalable loop steps by \code{\verb~|lanes<V>()~}. First-faulting loads, which SVE has and LLVM does not model, are out of scope, so a scan may not read past the end of its buffer and uses a mask for the tail.}
+\li{\strong{Where the masked memory operations live.} They are proposed as six operations under \code{\verb~|reussir.ptr~}. The alternative is to build a memref from the pointer and use the \code{\verb~|vector~} dialect operations, which needs a length the pointer does not have.}
+}
+}
+
+\subtree[design-simd-vectors-plan]{
+\title{Patch plan}
+
+\p{A stack of pull requests of about 300 changed lines each, tests included. Each one is usable on its own and leaves the textual IR round trip complete.}
+\table{
+\tr{\th{#}\th{Title}\th{Contents}}
+\tr{\td{1}\td{\code{\verb~|[conversion]~} the \code{\verb~|vector~} dialect lowers through the pipeline}\td{Register its conversion in \code{\verb~|reussir-convert-to-llvm~} and \code{\verb~|convert-to-llvm~}; lit tests for fixed, n-D and trailing-scalable shapes.}}
+\tr{\td{2}\td{\code{\verb~|[core]~} the \code{\verb~|Simd~} type, fixed}\td{\code{\verb~|TyKind~}, element and extent rules, display, mangling, HIR and MIR text, MLIR type; a vector as parameter and result.}}
+\tr{\td{3}\td{\code{\verb~|[core]~} scalable extents}\td{The bracket syntax, the last-extent rule, the storage rule with its instantiation-time check, \code{\verb~|lanes~}.}}
+\tr{\td{4}\td{\code{\verb~|[core]~} construction and lane access}\td{The \code{\verb~|core::simd~} intrinsic family; \code{\verb~|splat~}, \code{\verb~|step~}, \code{\verb~|from_elements~}, \code{\verb~|extract~}, \code{\verb~|insert~}.}}
+\tr{\td{5}\td{\code{\verb~|[core]~} lanewise arithmetic, comparison, \code{\verb~|select~}}\td{Unmasked forms only.}}
+\tr{\td{6}\td{\code{\verb~|[core]~} masks and predication}\td{\code{\verb~|mask_first~}, \code{\verb~|mask_const~}, \code{\verb~|any~}, \code{\verb~|all~}, \code{\verb~|count~}, \code{\verb~|first_set~}; the optional mask argument and its lowering.}}
+\tr{\td{7}\td{\code{\verb~|[core]~} reductions and scans}\td{\code{\verb~|reduce_<kind>~}, \code{\verb~|reduce_dims_<kind>~}, \code{\verb~|scan_<kind>~}, the reassociation flag.}}
+\tr{\td{8}\td{\code{\verb~|[core]~} vectors through pointers}\td{A vector as the accessed type of \code{\verb~|ptr::load~}, \code{\verb~|store~}, \code{\verb~|type_offset~}, \code{\verb~|advance~}; masks in memory.}}
+\tr{\td{9}\td{\code{\verb~|[conversion]~} \code{\verb~|[core]~} masked load and store}\td{\code{\verb~|reussir.ptr.masked_load~}, \code{\verb~|masked_store~} and \code{\verb~|simd::load~}, \code{\verb~|simd::store~}.}}
+\tr{\td{10}\td{\code{\verb~|[conversion]~} \code{\verb~|[core]~} gather, scatter, expand, compress}\td{The four remaining memory operations.}}
+\tr{\td{11}\td{\code{\verb~|[core]~} shape operations}\td{\code{\verb~|shape_cast~}, \code{\verb~|bitcast~}, \code{\verb~|broadcast~}, \code{\verb~|transpose~}, \code{\verb~|shuffle~}, \code{\verb~|interleave~}, \code{\verb~|deinterleave~}, slices, scalable sub-vectors, \code{\verb~|outer~}.}}
+\tr{\td{12}\td{\code{\verb~|[core]~} arrays and printing}\td{\code{\verb~|from_array~}, \code{\verb~|to_array~}, \code{\verb~|print~}.}}
+\tr{\td{13}\td{\code{\verb~|[test]~} the examples end to end}\td{The examples of this note as tests, run on fixed and scalable targets.}}
+\tr{\td{14}\td{\code{\verb~|[core]~} operators, if wanted}\td{Depends on the first open question.}}
+}
+\p{Patches 4 to 7 and 11 add operations to one intrinsic family, so each of them is mostly a table of names, a checker arm, a lowering arm and tests.}
+}
+
