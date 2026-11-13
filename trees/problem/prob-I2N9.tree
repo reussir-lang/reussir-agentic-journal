@@ -1,0 +1,22 @@
+\title{A scalable vector cannot be carried as loop state}
+\taxon{Problem}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\tag{compiler}
+\tag{simd}
+\meta{status}{open}
+\meta{created}{2026-11-13}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{A \code{\verb~|while~} expression with several state variables, \code{\verb~|while [i = 0, acc = v] (...)~}, has a tuple type, and the code generator passes the state through \code{\verb~|scf.while~} as one \code{\verb~|!reussir.record~} value. When \code{\verb~|acc~} is a scalable vector the record mixes a fixed member with a scalable one. LLVM has no such struct, and the layout computation of the record aborted the compiler. Found in \pr{996}.}
+\p{\strong{Current rule.} A scalable vector is not allowed inside a tuple, so the loop above is rejected with the storage diagnostic. A fixed vector as loop state works. This blocks the accumulator of [the dot product example](ex-QU06) and any other reduction that keeps a scalable vector across iterations.}
+\p{\strong{Directions.}}
+\ul{
+\li{Lower the state of a \code{\verb~|while~} as separate operands of \code{\verb~|scf.while~}, one per state variable, and rebuild the tuple only where the program uses it as a tuple. A pattern that binds every component, which is the common spelling, would then never build the record.}
+\li{Allow a tuple whose every use is a projection to stay unmaterialized in general. This is the same idea for all tuples and is a larger change to the code generator.}
+\li{Until then, reduce inside each iteration and carry the scalar: \code{\verb~|total + simd::reduce_add(chunk)~}. It is correct and slower than one reduction at the end.}
+}
+\p{\strong{What would close this.} The first direction, with a test that carries a scalable accumulator through a loop on SVE and RVV.}

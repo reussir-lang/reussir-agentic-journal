@@ -57,15 +57,19 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \p{The size of a scalable vector is not known when the program is compiled, so it has no place in a layout.}
 \table{
 \tr{\th{Use}\th{Fixed}\th{Scalable}}
-\tr{\td{Parameter, result, \code{\verb~|let~}, loop state}\td{yes}\td{yes}}
+\tr{\td{Parameter, result, \code{\verb~|let~}}\td{yes}\td{yes}}
+\tr{\td{State of a \code{\verb~|while~} with several variables}\td{yes}\td{no; see [prob-I2N9](prob-I2N9)}}
 \tr{\td{Record field, enum payload, array element}\td{yes}\td{no}}
-\tr{\td{Closure capture, tuple component}\td{yes}\td{no}}
-\tr{\td{Type argument of a generic record or function}\td{yes}\td{no, except the \code{\verb~|core::simd~} and \code{\verb~|core::ptr~} operations}}
+\tr{\td{Closure capture, closure signature, tuple component}\td{yes}\td{no}}
+\tr{\td{Type argument of a generic record}\td{yes}\td{no}}
+\tr{\td{Type argument of a generic function}\td{yes}\td{yes; the instance is checked like any function}}
 \tr{\td{\code{\verb~|ptr::load~}, \code{\verb~|ptr::store~}, \code{\verb~|simd::load~}, \code{\verb~|simd::store~}}\td{yes}\td{yes}}
 \tr{\td{\code{\verb~|ptr::type_offset~}, \code{\verb~|ptr::advance~}}\td{yes}\td{yes; the size is a run-time value}}
 \tr{\td{Foreign function boundary}\td{no, at first}\td{no}}
 }
-\p{The rule is checked where a type is used, as the pointee rule of pointers is, and again when a generic function is instantiated. A scalable vector is read from and written to memory by the operations themselves; what is forbidden is an object whose layout contains one.}
+\p{The rule is checked where a type is written and, for inferred types, when a function is instantiated. A scalable vector is read from and written to memory by the operations themselves; what is forbidden is a value whose layout contains one, and a tuple is such a value.}
+
+\p{\strong{Target check.} A program that uses a scalable vector is rejected when the target has neither AArch64 SVE nor the RISC-V vector extension. The driver checks once, after monomorphization, and reports the first use with its source location. A fixed vector is accepted on every target.}
 }
 
 }
@@ -204,6 +208,7 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \li{\strong{Two scalable dimensions.} Arm SME only.}
 }
 \transclude{prob-Y593}
+\transclude{prob-I2N9}
 }
 
 \subtree[design-simd-vectors-plan]{
@@ -214,8 +219,8 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \tr{\th{#}\th{Title}\th{Contents}}
 \tr{\td{1}\td{\code{\verb~|[conversion]~} the \code{\verb~|vector~} dialect lowers through the pipeline}\td{Its conversion in \code{\verb~|reussir-convert-to-llvm~} and \code{\verb~|convert-to-llvm~}, with the SVE options on AArch64; lit tests for fixed, n-D and trailing-scalable shapes.}}
 \tr{\td{2}\td{\code{\verb~|[core]~} the \code{\verb~|Simd~} type, fixed}\td{\code{\verb~|TyKind~}, element and extent rules, display, mangling, HIR and MIR text, MLIR type; a vector as parameter and result.}}
-\tr{\td{3}\td{\code{\verb~|[core]~} scalable extents}\td{The bracket syntax, the last-extent rule, the storage rule with its instantiation-time check, \code{\verb~|lanes~}.}}
-\tr{\td{4}\td{\code{\verb~|[core]~} construction and lane access}\td{The \code{\verb~|core::simd~} intrinsic family; \code{\verb~|splat~}, \code{\verb~|step~}, \code{\verb~|from_elements~}, \code{\verb~|extract~}, \code{\verb~|insert~}.}}
+\tr{\td{3}\td{\code{\verb~|[core]~} scalable extents}\td{The bracket syntax, the last-extent rule, the storage rule with its instantiation-time check, the target check.}}
+\tr{\td{4}\td{\code{\verb~|[core]~} construction and lane access}\td{The \code{\verb~|core::simd~} intrinsic family; \code{\verb~|splat~}, \code{\verb~|step~}, \code{\verb~|lanes~}, \code{\verb~|from_elements~}, \code{\verb~|extract~}, \code{\verb~|insert~}.}}
 \tr{\td{5}\td{\code{\verb~|[core]~} lanewise arithmetic, comparison, \code{\verb~|select~}}\td{Unmasked functions.}}
 \tr{\td{6}\td{\code{\verb~|[core]~} operators on vectors}\td{\code{\verb~|+ - * / % & | ^ << >>~}, unary \code{\verb~|-~} and \code{\verb~|!~}.}}
 \tr{\td{7}\td{\code{\verb~|[core]~} masks and predication}\td{\code{\verb~|mask_first~}, \code{\verb~|mask_const~}, \code{\verb~|any~}, \code{\verb~|all~}, \code{\verb~|count~}, \code{\verb~|first_set~}; the optional mask argument and its lowering.}}

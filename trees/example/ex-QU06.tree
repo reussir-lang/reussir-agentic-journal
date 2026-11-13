@@ -7,7 +7,7 @@
 \tag{example}
 \import{base-macros}
 
-\p{The accumulator is a scalable vector carried as loop state, which is one of the places a scalable value may live. The reduction happens once, after the loop.}
+\p{The accumulator is a scalable vector carried as loop state. This is not accepted yet: see [prob-I2N9](prob-I2N9). With a fixed vector type the example is within the rules. The reduction happens once, after the loop.}
 \pre{\verb~|
 import core::ptr;
 import core::simd;
