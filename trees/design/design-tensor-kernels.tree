@@ -1,0 +1,95 @@
+\title{Tensor kernels: value semantics over rc arrays}
+\taxon{Design}
+\date{2026-08-29}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\tag{design}
+\meta{created}{2026-08-29}
+\meta{updated}{2026-08-29}
+\meta{origin}{docs/design/tensor-kernels.md}
+\import{base-macros}
+
+\p{Adds a frontend \code{\verb~|Tensor~} type — transient, non-materializable, fusion- transparent — so users write value-semantic kernels that compile to \code{\verb~|linalg~} on tensors, with rc arrays as the only durable citizens. The framing parallel is the one the language already teaches: \strong{flex objects are to \code{\verb~|freeze~} what tensors are to \code{\verb~|materialize~}.} A flex object cannot escape its region unfrozen; a tensor cannot escape its chain unmaterialized. (\code{\verb~|str<local>~}'s transient lifescope and the \pr{344} note "\code{\verb~|modify~}'s view must not escape its region" are the other in-tree precedents.)}
+
+\subtree[design-tensor-kernels-status]{
+\title{Status}
+
+\p{Frontend landed: \code{\verb~|Tensor<[T; dims]>~} (path-based builtin former), \code{\verb~|core::intrinsic::tensor::{of, materialize, dim}~} on a \code{\verb~|TensorOp~} HIR/MIR node, the escape rules below (record members, closure captures/returns, signatures, container elements, FFI), and ownership treating \code{\verb~|of~} as consuming the rooted dup. Lowering stops at \code{\verb~|err(…)~} stubs; the pipeline/registry stages and the combinator surface are the open half.}
+}
+
+\subtree[design-tensor-kernels-why-combinators-cannot-live-on-arrays-directly]{
+\title{Why combinators cannot live on arrays directly}
+
+\p{The two in-place systems do not compose per-op. Rc/CoW decides in-place-ness at \em{runtime, per object} (\code{\verb~|rc.is_unique~}); one-shot bufferize decides it \em{statically, per SSA region}. If every combinator round-trips through an rc array, each op puts a uniqueness branch, a \code{\verb~|token.alloc~}, and a region boundary between itself and the next linalg op — and linalg fusion, which walks tensor SSA use-def chains, sees opaque \code{\verb~|reussir.*~} ops and stops. Fusing across that would mean implementing \code{\verb~|BufferizableOpInterface~} on rc ops and feeding a static analysis a runtime predicate. The scoped-tensor design dissolves it: the runtime decision happens \strong{once at each boundary}, the static analysis owns everything inside. This is also the spot no one else occupies — Lean/Koka have runtime-uniqueness in-place updates but no tensor compiler; every MLIR frontend has the tensor compiler but \em{asserts} \code{\verb~|restrict~}/\code{\verb~|writable~} unverified. Reussir's CoW machinery manufactures the aliasing contract one-shot needs.}
+}
+
+\subtree[design-tensor-kernels-what-already-exists]{
+\title{What already exists}
+
+\p{\code{\verb~|array.view~} accepts a tensor result, verified and lowered to \code{\verb~|bufferization.to_tensor %m restrict [writable]~} (\code{\verb~|writable~} iff the view came from \code{\verb~|array.with_unique_view~}). \code{\verb~|ConvertToSTD~} declares tensor/linalg/bufferization as dependent + legal dialects; the \code{\verb~|linalg~} transform-dialect extension is registered; the \code{\verb~|kernel~} transform anchor runs in the pipeline; and \code{\verb~|array_tensor_view_e2e.mlir~} is a working, executed \code{\verb~|linalg.matmul~} + \code{\verb~|bufferization.materialize_in_destination~} over an rc array with the RC-aliasing assertions passing. What is missing is the frontend type, the boundary facilities, and the bufferization passes in the shipping pipeline.}
+}
+
+\subtree[design-tensor-kernels-the-tensor-type]{
+\title{The \code{\verb~|Tensor~} type}
+
+\p{Scoping comes from typing rules, not a syntactic block — one-shot needs tensors function-local, nothing more, so the "scope" is the maximal tensor-typed SSA subgraph inside a function:}
+
+\ul{
+\li{may \strong{not}: be a record field, be captured by a closure, cross FFI, be a \code{\verb~|[field]~}, appear in a plain \code{\verb~|fn~} signature;}
+\li{\strong{may}: flow through let-bindings and \code{\verb~|if~}/\code{\verb~|match~} (→ \code{\verb~|scf.if~} on tensors, which bufferizes).}
+}
+
+\p{Combinators (\code{\verb~|map~}, \code{\verb~|zip_with~}, \code{\verb~|reduce~}, and the retargeted \code{\verb~|splat~}/\code{\verb~|tabulate~}/\code{\verb~|fold~}) live on \code{\verb~|Tensor~} and lower 1:1 to linalg named/generic ops. Element functions must reduce to scalar IR — a \code{\verb~|linalg.generic~} body is a region of scalar ops, so a runtime closure is a type error there, and \code{\verb~|ClosureBetaReduction~} (today \code{\verb~|-Oaggressive~}- gated) becomes mandatory on kernel paths or the frontend inlines the lambda during elaboration.}
+}
+
+\subtree[design-tensor-kernels-boundary-facilities-and-reuse]{
+\title{Boundary facilities and reuse}
+
+\table{
+\tr{\th{surface}\th{lowers to}\th{reuse}}
+\tr{\td{\code{\verb~|Tensor::of(xs)~}}\td{\code{\verb~|rc.borrow~} + \code{\verb~|array.view : tensor~} (\code{\verb~|to_tensor restrict~})}\td{zero copy}}
+\tr{\td{\code{\verb~|xs.modify(|t| …)~}}\td{\code{\verb~|with_unique_view~} tensor body + \code{\verb~|materialize_in_destination~}}\td{unique → in place, zero allocs; shared → one clone}}
+\tr{\td{\code{\verb~|t.materialize_into(ys)~}}\td{same branch on \code{\verb~|ys~}; runtime shape check → \code{\verb~|reussir.panic~} on mismatch}\td{as above}}
+\tr{\td{\code{\verb~|t.materialize()~}}\td{fresh box + \code{\verb~|with_unique_view~} + \code{\verb~|materialize_in_destination~}}\td{\code{\verb~|TokenReuse~} below}}
+}
+
+\p{\strong{Ownership of the view.} \code{\verb~|Tensor::of~} consumes a dup of \code{\verb~|xs~}; the tensor owns that reference until its last use, then \code{\verb~|rc.dec~}. A later \code{\verb~|xs.set(…)~} therefore sees count ≥ 2 and clones instead of mutating the viewed buffer — the \code{\verb~|restrict~} contract holds by construction, no static aliasing proof needed. Guardrail the frontend enforces: one live tensor materialization per array per scope (two \code{\verb~|to_tensor restrict~} over aliasing memrefs is UB).}
+
+\p{\strong{The anchoring rule (PoC-corrected).} Two facts the \code{\verb~|linalg_*~} conversion tests pin empirically:}
+
+\ul{
+\li{The write-back anchor must be the \strong{memref-destination} form, \code{\verb~|bufferization.materialize_in_destination %t in writable %view : (tensor<…>, memref<…>) -> ()~}. The tensor-destination form returns a tensor, and when that result is unused the whole kernel is dead code by value semantics — canonicalize deletes it before bufferization runs (the pre-existing e2e test survives only because its asserting extracts keep the chain alive).}
+\li{In-place comes from \strong{DPS-threading the view tensor through every stage's \code{\verb~|outs~}}, not from empty-tensor elimination: \code{\verb~|eliminate-empty-tensors~} refuses when an ins operand aliases the destination (it lacks one-shot's elementwise-access reasoning), while one-shot bufferizes \code{\verb~|ins(%t) outs(%t)~} in place happily. Threaded this way, fill → matmul → bias runs on the rc payload with zero temporaries and zero copies in both CoW branches (\code{\verb~|linalg_matmul_bias_dps.mlir~}).}
+}
+
+\p{Corollary: \code{\verb~|linalg-fuse-elementwise-ops~} \strong{breaks} the threading — the fused op's \code{\verb~|outs~} is rebuilt from \code{\verb~|tensor.empty~}, and the result is an alloc + copy that is strictly worse than the unfused two-pass form. A small post-fusion DPS re-anchoring rewrite (replace \code{\verb~|outs(tensor.empty)~} with the destination when the result feeds the materialize anchor and the op is elementwise with identity maps) is the missing piece before that pass can be enabled in the pipeline.}
+
+\p{\strong{The fusion path that works today is transform-driven tile-and-fuse} (\code{\verb~|linalg_tile_fuse_forall.mlir~}, executed e2e): tile the trailing stage into an \code{\verb~|scf.forall~} with \code{\verb~|transform.structured.tile_using_forall~}, fuse producers in with \code{\verb~|fuse_into_containing_op~} — the destination stays threaded through \code{\verb~|shared_outs~}/\code{\verb~|parallel_insert_slice~}, so one-shot bufferizes the whole fused tile loop onto the rc payload with zero temporaries, reading and writing \code{\verb~|memref.subview~}s with runtime offsets. Scheduling runs \em{before} the reussir expansion, so one kernel body is tiled once and cloned into both CoW branches — exactly the \code{\verb~|kernel~} transform anchor's slot. From there \code{\verb~|scf-forall-to-parallel~} materializes \code{\verb~|scf.parallel~} in both arms and \code{\verb~|convert-scf-to-openmp~} lowers those to \code{\verb~|omp.parallel~}/\code{\verb~|omp.wsloop~} — the OpenMP direction in AGENTS.md is reachable from this path.}
+
+\p{\strong{Fresh materialize reuses for free (PoC-verified, with a contract).} \code{\verb~|linalg_axpy_token_reuse.mlir~}: views taken, inputs dec'd, result box created before the kernel region — \code{\verb~|TokenReuse~} pairs the dead exact-size array tokens at the ensure tier (Score=2) \em{unadjusted}, and after \code{\verb~|rc-create-sink~}/\code{\verb~|rc-create-fusion~} the unique path degenerates to \code{\verb~|rc.reinterpret~} + \code{\verb~|token.launder~} + \code{\verb~|rc.create … skip_rc~}: the dead box becomes the result box with no free, no alloc, and no refcount write. The executable sibling verifies both modes element-by-element.}
+
+\p{The contract this exposes: the kernel still \em{reads} the donor's payload after the create — tensor reads are deferred into loops that bufferize later, unlike pure-Reussir loads which always precede a dec. With pointer-identity reuse the kernel reads and writes the same buffer, correct \strong{only for elementwise stages with identical index maps}. \code{\verb~|TokenReuse~} cannot see this, so the rule is the frontend's: emit consuming decs before the kernel only when every stage touching that input is elementwise-aligned; after the kernel otherwise. (A permuting kernel — reverse, transpose — over a reused donor would read already-overwritten elements.)}
+}
+
+\subtree[design-tensor-kernels-pipeline-and-registry]{
+\title{Pipeline and registry}
+
+\ul{
+\li{Register tensor/linalg/bufferization in the CAPI registry, keeping the invariant that no op of theirs survives past \code{\verb~|convert-bufferization-to-memref~} — then \code{\verb~|reussir-convert-to-llvm~} (which walks loaded dialects for \code{\verb~|ConvertToLLVMPatternInterface~}) never meets their promised interfaces, preserving the reason they were excluded.}
+\li{Insert, between the \code{\verb~|kernel~} transform anchor and \code{\verb~|SCFToControlFlow~}: \code{\verb~|one-shot-bufferize~}, the buffer-deallocation pipeline, \code{\verb~|convert-linalg-to-loops~}, \code{\verb~|convert-bufferization-to-memref~} (+ canonicalize/cse) — the sequence \code{\verb~|array_tensor_view_e2e.mlir~} hand-spells, plus deallocation, which that test dodges only because matmul-into-destination has no intermediates. The anchor thereby fires on linalg-on-tensors: tiling/fusion via the surface \code{\verb~|transform [{ … }]~} item at upstream's intended scheduling point, before bufferization.}
+\li{Fusion-surviving intermediates are plain \code{\verb~|memref.alloc~}s — scope- confined, invisible to rc and to token reuse, and \strong{leaked} by the bare bufferization sequence (\code{\verb~|linalg_reduction_buffer_cleanup.mlir~} pins the leak and both remedies): run \code{\verb~|promote-buffers-to-stack~} first (bounded temporaries become allocas), then the ownership-based deallocation pipeline for what stays on the heap. Unifiable later by pointing bufferization's allocation hooks at \code{\verb~|__reussir_allocate~}.}
+\li{Two pass-ordering facts from the tile-and-fuse experiment: tiling emits \code{\verb~|affine.apply~}, and \code{\verb~|affine~} is not in \code{\verb~|reussir-convert-to-std~}'s legal set — the \code{\verb~|with_unique_view~} expansion rolls back on a tiled body, so \code{\verb~|lower-affine~} must run after the interpreter (or \code{\verb~|affine~} joins the pass's dependent dialects); and bufferized tile loops address \code{\verb~|memref.subview~}s, so \code{\verb~|expand-strided-metadata~} (plus a second \code{\verb~|lower-affine~}) is required before \code{\verb~|reussir-lowering-basic-ops~} — the same insertion the dynamic-extent design already calls for.}
+\li{\code{\verb~|--token-reuse-remarks~} learns to tag materialization sites, so "did my kernel run in place" is checked from the remarks JSON, not by reading LLVM IR.}
+}
+}
+
+\subtree[design-tensor-kernels-deferred]{
+\title{Deferred}
+
+\ul{
+\li{\code{\verb~|kernel fn~} (tensors in function signatures): needs function-boundary bufferization or mandatory inlining; region-local tensors sidestep it entirely, so it waits until composition pressure is real.}
+\li{\code{\verb~|vector~}-dialect lowering and GPU targets: the linalg layer is the entry ticket; neither dialect is registered today.}
+\li{Stride-0 broadcast views: borrowed-only if ever (aliasing vs. the drop traversal), see [design-dynamic-extent-arrays](design-dynamic-extent-arrays).}
+\li{Dynamic shapes in kernels compose with the dynamic-extent array work: \code{\verb~|tensor<?x?xf64>~} views fall out of the strided-header box design.}
+}
+}

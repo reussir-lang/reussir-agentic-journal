@@ -1,0 +1,142 @@
+\title{\code{\verb~|--emit rri~}: the reduced HIR interface}
+\taxon{Design}
+\date{2026-07-26}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\contributor{claude-fable-5-1}
+\tag{design}
+\meta{created}{2026-07-26}
+\meta{updated}{2026-10-21}
+\meta{origin}{docs/design/rri.md}
+\import{base-macros}
+
+\p{Second PR of the cross-package HIR-index arc (\pr{451}, opened by \pr{467}). An \code{\verb~|.rri~} file is the interface a compiled Reussir package presents to downstream packages: everything a consumer needs to type-check against it and to monomorphize its generics locally, and nothing else. It is the analogue of rustc's \code{\verb~|.rmeta~} — except it is not a new format at all: an rri is a valid textual HIR document, produced by the existing printer and consumed by the existing parser, filtered down to the export closure and fronted by a versioned header.}
+
+\subtree[design-rri-why-reduced-and-why-hir]{
+\title{Why reduced, and why HIR}
+
+\p{Monomorphization needs bodies. \code{\verb~|full/mono.rs~} instantiates a generic by substituting into its elaborated HIR \code{\verb~|Function~} — so whatever crosses the package boundary must carry generic bodies in a form \code{\verb~|MonoInput~} can be rebuilt from. That path is already proven end to end: \code{\verb~|--emit hir~} output re-enters through \code{\verb~|hir::build::parse_program~}, and the round-trip test in \code{\verb~|mono.rs~} asserts mono-from-reparsed-HIR is byte-identical to mono-from-original.}
+
+\p{Reduced, because the full dump ships every private body. The reduction:}
+
+\ul{
+\li{keeps private implementation out of the artifact — an edit to a private ground function's \em{body} leaves the interface's semantic content unchanged, which is what lets \code{\verb~|rene~} skip rebuilding dependents (see Determinism);}
+\li{makes the access-control story explicit: what is in the rri is exactly what a foreign instantiation may touch.}
+}
+
+\p{\pr{467} already did the linkage half of this contract: \code{\verb~|mono::mono_exports~} computes the private ground functions reachable from \code{\verb~|pub~} generic bodies and keeps their symbols externally linkable (\code{\verb~|LinkagePolicy::Aot~}), and foreign re-instantiations dedup as \code{\verb~|weak_odr~}. The rri is the other half: the set of things it ships is computed by the \em{same traversal}, so the two cannot drift.}
+}
+
+\subtree[design-rri-contents-the-export-closure]{
+\title{Contents: the export closure}
+
+\p{Computed post-elaboration over \code{\verb~|elab.elaborated~} / \code{\verb~|elab.records~}, sharing \code{\verb~|mono_exports~}' call-target walk (factor the traversal, do not duplicate it).}
+
+\p{Seeds:}
+
+\ul{
+\li{every \code{\verb~|pub~} \strong{generic} function — shipped with its full body;}
+\li{every \code{\verb~|pub~} \strong{ground} function — shipped as a prototype (\code{\verb~|fn #p(...) -> T;~}).}
+}
+
+\p{Closure, walking only the bodies that ship:}
+
+\ul{
+\li{a \strong{generic} callee (any visibility) ships with its body and is walked in turn — a downstream instantiation re-instantiates it locally;}
+\li{a \strong{ground} callee (any visibility) ships as a prototype — its symbol is external in this package's artifact, exactly the \pr{467} \code{\verb~|mono_exports~} guarantee. Ground bodies never ship, \code{\verb~|pub~} or not;}
+\li{every \strong{record} mentioned by a shipped signature, body, shipped trait's associated const type, or shipped record field ships in full (fields included — the consumer's mono must resolve layouts), closed to fixed point mirroring \code{\verb~|close_records_over_fields~};}
+\li{\strong{strings} referenced by shipped bodies ship (table filtered and reindexed);}
+\li{\strong{transform anchors/scripts} referenced by shipped bodies ship;}
+\li{\strong{ffi imports and the preludes they need} ship for shipped defs — a \code{\verb~|pub~} generic \code{\verb~|#[ffi(import)]~} (polymorphic FFI) is part of the surface; the consumer's build generates and compiles its Rust textures per instance. (Format-complete now; the \code{\verb~|--extern~} PR decides when instantiating them is actually supported.)}
+}
+
+\p{Excluded: trampolines and \code{\verb~|#[main]~} (the package's own C-ABI link surface, not cross-package callable — and mono roots must not leak: a consumer never re-instantiates this package's roots), and everything private outside the closure.}
+
+\p{\strong{The load-bearing invariant:} every bodyless, non-ffi function in an rri names a symbol the producing package's compiled artifact exports with external linkage. Loading gives \code{\verb~|body: None~} a second meaning the consumer pipeline needs anyway: \em{external declaration} — not seeded as a definition root in mono, lowered as a MIR declaration, resolved at link time against the producing package's artifact.}
+}
+
+\subtree[design-rri-format]{
+\title{Format}
+
+\p{A valid \code{\verb~|.hir~} document under the existing lalrpop grammar, plus one new leading header item:}
+
+\pre{\verb~|
+interface 1 package "demo" producer "rrc 0.5.0 (7d9c4d3)";
+~}
+
+\ul{
+\li{\code{\verb~|1~} is the format integer, bumped on any grammar change;}
+\li{\code{\verb~|package~} names the package the interface describes; \code{\verb~|--extern name=path~} must match it;}
+\li{\code{\verb~|producer~} is the exact producing-rrc version string. While the HIR grammar is unstable the consumer refuses \strong{any} mismatch of either field (rustc does the same with \code{\verb~|.rmeta~}); relax when the format stabilizes.}
+}
+
+\p{The header is a grammar item (parsed, not sniffed by the driver), rejected in plain \code{\verb~|.hir~} re-entry and required first in \code{\verb~|.rri~}.}
+
+\p{\strong{Generic binders carry their trait bounds} as \code{\verb~|+~}-separated qualified paths (\code{\verb~|<$0 (T): Num + Sync>~}). Loading resolves each bound by its final path segment against the builtin trait table and re-registers it on the remapped generic, so a bad instantiation of an imported generic reports at the consumer's call site rather than inside the imported body at monomorphization. A bound-less binder (a pre-bounds dump) reloads with no bounds; an unknown bound name reports "unknown trait bound" and the binder degrades to the resolvable subset.}
+
+\p{\strong{Spans stay.} The rri is printed in the sources form (\code{\verb~|Printer::with_sources~}): file table plus per-item/per-node spans, so diagnostics raised while instantiating an upstream body point into the upstream package's sources. File-table paths are rewritten \strong{package-root-relative} (the \code{\verb~|SourceCache~} may hold absolute paths; absolute paths in the artifact would break reproducibility across checkouts).}
+
+\p{\strong{Determinism.} Records are already printed sorted by qualified path; functions are likewise sorted by qualified path in rri mode (elaboration order leaks declaration order otherwise; plain \code{\verb~|--emit hir~} keeps its current order to avoid churning existing expectations). One honest trade-off of keeping spans: a private-body edit \em{above} an exported item shifts its byte offsets, so the rri file changes even though its semantic content did not. \code{\verb~|rene~} still fingerprints dependents on the rri digest — coarser than ideal, never wrong. If this proves to matter, a later refinement can hash a span-stripped normalization; not in v1.}
+
+\p{\strong{Paths are package-rooted.} \code{\verb~|module_path~} roots every file's module at the package name (\code{\verb~|[pkg, foo]~}), and the printer emits qualified paths, so rri items are addressable as \code{\verb~|#pkg::mod::item~} with no collision against consumer defs. DefIds are never part of the wire format — \code{\verb~|parse_program~} rebuilds a fresh \code{\verb~|DefTable~}; paths are the stable identity, and the shared v0 mangling (\code{\verb~|Mangler::mangle_instance~}) makes consumer-emitted instance symbols coincide with any the producer already emitted (\code{\verb~|weak_odr~} dedups at link).}
+}
+
+\subtree[design-rri-record-visibility-prerequisite]{
+\title{Record visibility (prerequisite)}
+
+\p{Records and enums currently have no visibility — the whole package is one unit, so it never mattered. Cross-package it does: the rri must ship private records in the closure (layout), but consumer \em{source} must not name them.}
+
+\p{So the arc grows a preparatory step: surface \code{\verb~|pub struct~} / \code{\verb~|pub enum~}, a visibility field on \code{\verb~|Record~}/record HIR (printed \code{\verb~|pub~}, defaulting private like functions), and the private-in-public check — a \code{\verb~|pub~} function's signature and a \code{\verb~|pub~} record's fields may only mention \code{\verb~|pub~} records (Rust's E0446 discipline). This is enforced at elaboration always, not only when emitting rri; in-repo tests and examples grow \code{\verb~|pub~} on the records their public surfaces mention. Shipping it as its own PR keeps the churn reviewable apart from the rri machinery.}
+
+\p{Access control then falls out of the existing representation: the parsed \code{\verb~|visibility~} governs whether \em{consumer-source resolution} may reference a loaded def, while references inside loaded bodies resolve within the parsed unit and bypass the check — a shipped private generic is instantiable through a \code{\verb~|pub~} caller but never nameable.}
+}
+
+\subtree[design-rri-driver-wiring]{
+\title{Driver wiring}
+
+\ul{
+\li{\code{\verb~|Stage::Rri~}, ordered between \code{\verb~|Hir~} and \code{\verb~|Mir~}; \code{\verb~|is_input()~} is false (consumption is \code{\verb~|--extern~}, a different axis than pipeline re-entry — an rri is not a completable program: it has no mono roots). The ordering makes \code{\verb~|.mir~}-and-later inputs refuse it through the existing pipeline-runs-forward check — no generic bodies left to witness reachability, the same reason \pr{467} does not serialize \code{\verb~|mono_exported~}.}
+\li{Emission hooks at the existing \code{\verb~|target == Stage::Hir~} branch in \code{\verb~|frontend_package~}: full elaboration in hand, compute the closure, print the filtered slices. \strong{Package mode only}: the header names the package it describes, and only \code{\verb~|--package-root~}/\code{\verb~|--package-name~} carry that name authoritatively — a bare file or a plain \code{\verb~|.hir~} dump does not (and \code{\verb~|--package-name~} on a \code{\verb~|.hir~} input already means "treat as package source"), so both are refused.}
+\li{A plain-\code{\verb~|.hir~} re-entry that finds an interface header is refused: the prototypes have no bodies to compile and the mono roots stayed home.}
+\li{\code{\verb~|--emit rri~}, extension \code{\verb~|.rri~}, \code{\verb~|-o~} respected (including \code{\verb~|-o -~}). No other new flags in this PR.}
+\li{v1 emits rri in its own invocation. A combined \code{\verb~|--emit staticlib~} + side-interface flag (rustc's \code{\verb~|--emit metadata,link~} shape) would save one elaboration per dependency; deferred until rene wiring shows it matters.}
+}
+}
+
+\subtree[design-rri-consumer-contract-forward-looking-later-prs]{
+\title{Consumer contract (forward-looking, later PRs)}
+
+\p{Recorded here so the format cannot paint them into a corner:}
+
+\ul{
+\li{\code{\verb~|--extern name=path.rri~}: header gate (format int + producer string + package name), \code{\verb~|parse_program~} into the shared \code{\verb~|TyCtxt~}, defs offered to resolution under visibility.}
+\li{\strong{Re-anchoring the file table} (debug-info fidelity): the rri's paths are package-root-relative on purpose — byte-stability across checkouts is what rene fingerprints — but a consumer that monomorphizes a loaded body emits that instance's locations, and a bare \code{\verb~|lib.rr~} resolved against the \em{consumer's} build context would detach the debug info to the wrong place. This is DWARF's \code{\verb~|comp_dir~} split: relative names in the artifact, base directory supplied by the environment. \code{\verb~|--extern~} therefore carries a per-extern source root alongside the interface path (rene supplies it for free — its path dependencies know each dep's package root); the loader joins file-table entries onto it before building the consumer-side source cache, so diagnostics and the DWARF of locally-emitted instances point at the producing package's real sources. With no root given, entries load as unfetchable virtual files — locations degrade to name-only, never resolve against the consumer's cwd.}
+\li{\code{\verb~|MonoInput~} gains the loaded functions/records/strings/ffi/transform tables; the one mono change is bodyless-ground handling (declaration, not definition root).}
+\li{Linking: \code{\verb~|--link-lib~} / rene passes the producing package's artifact; rene's \code{\verb~|dependencies~} map (recorded-only today) starts resolving — bake each dep to \code{\verb~|staticlib~} + \code{\verb~|rri~}, feed dependents \code{\verb~|--extern~} + \code{\verb~|--link-lib~}, fingerprint dependents on the rri digest.}
+\li{COFF comdat closes the arc (\code{\verb~|weak_odr~} needs comdat on COFF).}
+}
+}
+
+\subtree[design-rri-testing]{
+\title{Testing}
+
+\ul{
+\li{\strong{reussir-core unit} (beside the \code{\verb~|mono_exports~} test): closure selection — \code{\verb~|pub~} generic ships with body; private generic callee ships with body; private ground callee ships as prototype; \code{\verb~|pub~} ground ships as prototype (no body); unreachable private items absent; record field closure reaches nested records; strings filtered to shipped bodies.}
+\li{\strong{driver round-trip}: emitted rri parses via \code{\verb~|parse_program~}; reprint is a fixed point (rri → parse → print → identical text).}
+\li{\strong{header gate unit}: format/producer/package mismatch refused; header rejected in plain \code{\verb~|.hir~}.}
+\li{\strong{lit}: a package mixing pub/private, generic/ground → \code{\verb~|--emit rri~} → FileCheck: header line; \code{\verb~|pub fn~} generic body present; prototypes end in \code{\verb~|;~}; \code{\verb~|NOT:~} on a private unreachable symbol and on any ground body; record \code{\verb~|pub~} markers.}
+\li{Record-visibility PR carries its own diagnostics lit (private-in-public).}
+}
+}
+
+\subtree[design-rri-pr-sequence]{
+\title{PR sequence}
+
+\ol{
+\li{Record visibility + private-in-public check (surface, HIR grammar, tests).}
+\li{\code{\verb~|--emit rri~} (header item, closure computation shared with \code{\verb~|mono_exports~}, filtered sources-form printing, relative file table).}
+\li{\code{\verb~|--extern~} loading + access control.}
+\li{Cross-package monomorphization + \code{\verb~|--link-lib~} + rene dependency wiring.}
+\li{COFF comdat.}
+}
+}

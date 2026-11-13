@@ -1,0 +1,7 @@
+\title{Decisions}
+
+\p{Decisions that were made, with the alternatives that were considered and the reason for the choice. A decision is never edited into a different decision: a later one supersedes it and links back.}
+
+\query\datalog{
+ ?X -: {\rel/has-taxon ?X '{Decision}}
+}

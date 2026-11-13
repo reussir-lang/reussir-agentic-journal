@@ -1,0 +1,321 @@
+\title{Thread safety: the \code{\verb~|Sync~} discipline, \code{\verb~|Arc~}, and cells}
+\taxon{Design}
+\date{2026-07-19}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\contributor{claude-fable-5-1}
+\contributor{claude-opus-5-5}
+\tag{design}
+\meta{status}{design accepted, partially implemented}
+\meta{created}{2026-07-19}
+\meta{updated}{2026-10-24}
+\meta{origin}{docs/design/thread-safety.md}
+\import{base-macros}
+
+\p{Status: \strong{design accepted, partially implemented.} The frontend has the \code{\verb~|Arc~} type and the cell surface (\code{\verb~|Cell~}/\code{\verb~|RefCell~}); the MLIR dialect has the full cell-kind lattice and the atomic box axis; the \code{\verb~|Sync~} structural rules, the per-member atomic axis, and \code{\verb~|Arc~} lowering are not implemented yet. Sections marked \em{(open)} record decisions that are deliberately deferred.}
+
+\p{This document is the single source of truth for the rules. When code and this document disagree, one of them is a bug — file it.}
+
+\subtree[design-thread-safety-s1]{
+\title{1. The model: atomicity is a property of the box}
+
+\p{Every rc-managed object lives in a box \code{\verb~|rc<T, capability, atomicKind>~} where \code{\verb~|atomicKind ∈ {normal, atomic}~}. A \em{normal} box bumps its refcount with plain loads/stores; an \em{atomic} box uses atomic ops (\code{\verb~|rc.fetch_sub~} with acq-rel ordering on the decrement path; blind count stores are forbidden — \code{\verb~|ReussirRcSetOp~} rejects atomic boxes).}
+
+\p{Thread safety in Reussir is therefore a property of \strong{which boxes a thread can reach}, and the entire discipline reduces to one invariant:}
+
+\blockquote{
+\p{\strong{No normal-count box, no plain/exclusive cell, and no regional object is ever reachable from more than one thread.}}
+}
+
+\p{\code{\verb~|Arc~} and the sync cell kinds are the two surface mechanisms that mark a box atomic; the \code{\verb~|Sync~} predicate is the type-level check that the invariant holds transitively.}
+
+\p{Unlike Koka/Perceus (which re-colors boxes \em{dynamically} when a value becomes thread-shared, and is sound only because Koka is pure), Reussir's coloring is \strong{static and set at birth}: an arc is never re-colored from an existing plain shared value, and the type system — not a runtime graph walk — guarantees the interior is safe. This is required, not a preference: a language with writable cells cannot use Koka's dynamic argument, because a cell reachable from a shared box is a channel through which a still-thread-local value could later be smuggled into shared space. A type-level bound on what cells may \em{ever} hold closes that channel; a creation-time value scan does not.}
+}
+
+\subtree[design-thread-safety-s2]{
+\title{2. The \code{\verb~|Sync~} trait}
+
+\p{There is \strong{one} thread-safety predicate, the auto trait \code{\verb~|Sync~}:}
+
+\blockquote{
+\p{\code{\verb~|Sync(τ)~} — a value of type \code{\verb~|τ~} may be reached (aliased, read, cloned, stored, dropped) from any thread, concurrently with other threads doing the same.}
+}
+
+\p{The name is borrowed from Rust, but the meaning is deliberately stronger: Reussir's \code{\verb~|Sync~} subsumes \strong{both} of Rust's \code{\verb~|Send~} and \code{\verb~|Sync~} (§2.1). When this document refers to Rust's weaker predicate it always says "Rust's \code{\verb~|Sync~}."}
+
+\subtree[design-thread-safety-s2-1]{
+\title{2.1 Why one trait and not Rust's Send/Sync pair}
+
+\p{Rust needs two predicates because it can express \em{exclusive transfer}: moving a \code{\verb~|Cell<T>~} to another thread is safe (\code{\verb~|Send~}) even though sharing it is not (\code{\verb~|!Sync~}), and the borrow checker proves the move leaves no aliases behind. Reussir cannot express that weaker capability: rc handles are freely duplicable within a thread and carry no linearity, so "this value has no remaining aliases on the origin thread" is not provable at the type level. Any value that crosses a thread boundary must be assumed to be simultaneously reachable from both sides — transfer collapses into sharing: Rust's \code{\verb~|Send~} and \code{\verb~|Sync~} coincide, and the single surviving predicate keeps the name \code{\verb~|Sync~}.}
+
+\p{Two consequences we accept explicitly:}
+
+\ul{
+\li{In Rust, \code{\verb~|Mutex<T>~} is \code{\verb~|Sync~} given only \code{\verb~|T: Send~}. Reussir's mutex cell demands the stronger \code{\verb~|Sync(τ)~} (§4.3) — the Send-only row of Rust's table is unreachable without linearity, so nothing is actually lost.}
+\li{If uniqueness/linear tracking ever lands (a proven-unique rc, a consume-once closure), a transfer-only predicate weaker than \code{\verb~|Sync~} (i.e. a genuine \code{\verb~|Send~}) becomes meaningful and can be added \em{then} without breaking this scheme. The Phase-0 \code{\verb~|Send~} trait declaration in \code{\verb~|semi/traits/builtins.rs~} is retired; \code{\verb~|Sync~} remains as the sole predicate, carrying the strengthened meaning above.}
+}
+}
+
+\subtree[design-thread-safety-s2-2]{
+\title{2.2 Structural rules}
+
+\p{Base cases:}
+
+\table{
+\tr{\th{Type}\th{\code{\verb~|Sync~}?}\th{Reason}}
+\tr{\td{primitive scalars (\code{\verb~|iN~}/\code{\verb~|fN~}/\code{\verb~|bool~}/\code{\verb~|char~}/unit)}\td{yes}\td{no identity, copied by value}}
+\tr{\td{\code{\verb~|str~} (global lifescope)}\td{yes}\td{immortal immutable bytes}}
+\tr{\td{\code{\verb~|str~} (local lifescope)}\td{no}\td{borrows a scope on the origin thread}}
+\tr{\td{\code{\verb~|Arc<X>~} (WF per §3)}\td{\strong{yes}}\td{atomic box; WF guarantees the interior}}
+\tr{\td{plain \code{\verb~|[shared]~} record / array / closure box}\td{\strong{no}}\td{normal refcount races (\code{\verb~|Rc: !Send~} in Rust terms)}}
+\tr{\td{atomic / mutex / flatlock / rwlock cell}\td{\strong{yes}}\td{born in an atomic shared box, §4}}
+\tr{\td{plain (\code{\verb~|Cell~}) / exclusive (\code{\verb~|RefCell~}) cell}\td{\strong{no}}\td{unsynchronized store / non-atomic in-use flag}}
+\tr{\td{regional (\code{\verb~|flex~} / \code{\verb~|rigid~} / \code{\verb~|field~}), region handles, views, refs, holes, cctx}\td{\strong{no}}\td{§6}}
+}
+
+\p{Structural propagation (an auto trait: derived, never written by the user):}
+
+\ul{
+\li{\code{\verb~|[value]~} record: \code{\verb~|Sync~} iff every member type is \code{\verb~|Sync~}.}
+\li{\code{\verb~|Nullable<P>~}: \code{\verb~|Sync~} iff \code{\verb~|Sync(P)~}.}
+\li{Generic parameters: \code{\verb~|Sync~} obligations are deferred and re-checked at monomorphization, exactly like \code{\verb~|Arc~}'s inner check today (\code{\verb~|mono.rs::check_arc_inners~}).}
+}
+
+\p{Note carefully what is \em{absent}: a \code{\verb~|[shared]~} record is never \code{\verb~|Sync~} \strong{as a bare type}, no matter what its members are. Shareability of an rc object is carried by the coloring of its box (\code{\verb~|Arc<X>~}), not by the nominal type \code{\verb~|X~}. That stratification is the next section.}
+
+\p{Diagnostics requirement: when a type fails \code{\verb~|Sync~}, the error must name the offending member path ("\code{\verb~|Foo~} is not \code{\verb~|Sync~} because member \code{\verb~|bar.baz~} is a plain \code{\verb~|[shared]~} record"), not just the root type. Rust's auto-trait errors are famously non-local; we should not reproduce that.}
+}
+}
+
+\subtree[design-thread-safety-s3]{
+\title{3. \code{\verb~|Arc~} well-formedness: coloring one box, requiring \code{\verb~|Sync~} inside}
+
+\p{\code{\verb~|Arc<X>~} is the same nominal \code{\verb~|X~} behind a box whose refcount is atomic. Reads (projection, matching) see through the coloring; only the rc discipline differs. The coloring is established exactly once, at construction — an existing plain value is never promoted.}
+
+\p{The well-formedness rule is stratified: \strong{\code{\verb~|Arc~} supplies atomicity for exactly the one box it wraps; everything strictly inside must already be self-sufficiently thread-safe.}}
+
+\pre{\verb~|
+WF(Arc<X>)          where X is a [shared] record
+    ⟺  Sync(member_i′)  for every member type of X (every arm, for variants),
+        where member_i′ re-colors a member in X's recursive group as its own
+        Arc (§3.3) and is member_i unchanged otherwise
+
+WF(Arc<Array<T>>)   ⟺  Sync(T)
+
+WF(Arc<(A₁,…,Aₙ) -> R>)   ⟺  Sync(Aᵢ) for all i        (R unconstrained, §3.2)
+
+WF(Arc<Nat>), WF(Arc<Int>)                                (§3.4)
+~}
+
+\p{Everything else is rejected as an \code{\verb~|Arc~} inner, matching \code{\verb~|ty_eval.rs::arc_inner_rejection~} today: \code{\verb~|[value]~} records (not an rc box — embed them; their members are checked via \code{\verb~|Sync~} propagation), \code{\verb~|[regional]~} records, cells (§4.1), \code{\verb~|Nullable~}, scalars, and nested \code{\verb~|Arc~}.}
+
+\p{The canonical example of the stratification: let \code{\verb~|FooBase~} be a \code{\verb~|[shared]~} record whose members are all \code{\verb~|Arc<…>~}, sync cells, or \code{\verb~|Sync~} value types. Then:}
+
+\ul{
+\li{\code{\verb~|FooBase~} itself is \strong{not} \code{\verb~|Sync~} — its own box count is normal, and two threads cloning the same \code{\verb~|FooBase~} handle race that count.}
+\li{\code{\verb~|Arc<FooBase>~} is well-formed and \strong{is} \code{\verb~|Sync~} — the arc makes the outer count atomic, and the members were already safe.}
+}
+
+\p{Consequences:}
+
+\ol{
+\li{\strong{Gradual atomicity.} A single-threaded \code{\verb~|FooBase~} holding \code{\verb~|Arc~} members pays atomic ops only on those members, and is promoted to a shareable value by constructing it as \code{\verb~|Arc<FooBase>~} — no restructuring, no deep copy.}
+\li{\strong{No runtime graph walk.} Arc construction never traverses the object graph; the WF check already forced the interior to be atomic where it needs to be. Contrast Verona's \code{\verb~|freeze~} (a deep runtime operation) and Koka's dynamic share-marking.}
+\li{\strong{Both halves of Rust's \code{\verb~|Arc~} bound are covered by \code{\verb~|Sync~}.} In Rust, \code{\verb~|Arc<T>~} needs \code{\verb~|T: Sync~} (concurrent readers) \em{and} \code{\verb~|T: Send~} (the last drop runs on an arbitrary thread). Reussir's \code{\verb~|Sync~} is the conjunction: every box the drop glue of an arc can reach is atomic, so a final decrement on any thread is safe; every value a reader can clone out is \code{\verb~|Sync~}, so concurrent reads are safe.}
+}
+
+\subtree[design-thread-safety-s3-1]{
+\title{3.1 Reads through the coloring}
+
+\p{Projection and matching on \code{\verb~|Arc<X>~} see \code{\verb~|X~}'s members. A member that is itself an rc object comes out \strong{with its own coloring}: a declared \code{\verb~|Arc<Y>~} member projects as \code{\verb~|Arc<Y>~}, and a bare same-group member of an arc'd recursive record projects \em{promoted} (§3.3). Representationally, an \code{\verb~|Arc<Y>~} member lowers to the explicit member type \code{\verb~|rc<Y, shared, atomic>~} — the one rc member form the dialect admits, because the container's capability cannot derive it: the container may be a normal, thread-local box while the member's count is shared with other threads (its drop glue must decrement atomically even though the container's own count is plain). \code{\verb~|Arc~} members are legal in shared and \code{\verb~|[value]~} records; a \code{\verb~|[regional]~} record rejects them \strong{for now (not implemented)} — nothing in the current machinery is known to break, but the interaction with the deferred sync-regional design (§6) is deliberately left undecided until that design is written down.}
+}
+
+\subtree[design-thread-safety-s3-2]{
+\title{3.2 Arc closures: type-level WF plus a creation-site capture check}
+
+\p{Reussir closures are partial-application objects: \code{\verb~|closure.apply~} writes each argument into the payload after the closure is created, \code{\verb~|closure.eval~} consumes a reference, and a non-unique closure is cloned (vtable \code{\verb~|clone~} acquires every payload slot) before in-place application. For an arc'd closure this means:}
+
+\ul{
+\li{it can be \strong{called from many threads simultaneously} — calling is shared access (Rust: needs \code{\verb~|F: Sync~}, strictly more than the \code{\verb~|F: Send~} that \code{\verb~|thread::spawn~} demands for its one-shot transfer);}
+\li{clone and drop run \code{\verb~|acquire~}/\code{\verb~|drop~} on the captures from arbitrary threads concurrently, so every payload slot must hold an atomically-counted or count-free value;}
+\li{\strong{capture time is not one point}: every later \code{\verb~|apply~} adds a capture.}
+}
+
+\p{A creation-time check alone is therefore insufficient. The rule has two parts that together cover every payload slot statically:}
+
+\ol{
+\li{\strong{Type-level WF}: \code{\verb~|Arc<(A₁,…,Aₙ) -> R>~} requires \code{\verb~|Sync(Aᵢ)~} for every argument type. Any future \code{\verb~|apply~} goes through the closure's type, so applied arguments are \code{\verb~|Sync~} by construction — no per-apply flow check.}
+\li{\strong{Creation-site check}: at the point where a closure receives the arc coloring, every value captured from the environment must be \code{\verb~|Sync~} (Swift \code{\verb~|@Sendable~}'s capture rule, upgraded from "sendable" to our single, stronger predicate).}
+}
+
+\p{\code{\verb~|R~} is unconstrained: the result materializes on the evaluating thread, which owns it outright; it never crosses a thread by virtue of the closure being shared. (If a future combinator does move results across threads, \em{that} combinator bounds \code{\verb~|R~}, not the closure type.)}
+
+\p{A bare (non-arc) closure remains \code{\verb~|!Sync~} like any plain shared box, with no constraint on captures or argument types — single-threaded code pays nothing.}
+
+\p{\em{(future)} A linear, consume-once closure kind could soundly weaken the capture bound to a transfer-style check (Rust \code{\verb~|FnOnce~} + \code{\verb~|spawn~}, Futhark's "a consuming function may not be called twice" restriction), but that requires linearity the type system does not have; out of scope here.}
+}
+
+\subtree[design-thread-safety-s3-3]{
+\title{3.3 Recursive types: color propagation through the recursive group}
+
+\p{The flat WF rule alone cannot express an arc'd recursive structure. In}
+
+\pre{\verb~|
+enum List<T> { Nil, Cons(T, List<T>) }
+~}
+
+\p{the \code{\verb~|Cons~} tail is a bare \code{\verb~|[shared]~} box — never \code{\verb~|Sync~} — so a literal reading of §3 makes \code{\verb~|Arc<List<T>>~} permanently ill-formed. The unsoundness it guards against is real (an atomic head over a non-atomic spine), but the \em{shareable list as such} is not unsound; the declaration simply has no way to say "under \code{\verb~|Arc~}, this link is also \code{\verb~|Arc~}". Rust answers with duplication (an \code{\verb~|Rc~} list and an \code{\verb~|Arc~} list are unrelated types, one per pointer flavor); because our \code{\verb~|Arc~} is a coloring of the same record rather than a wrapper type, we can do better.}
+
+\p{\strong{Rule (decided 2026-07-19): \code{\verb~|Arc<X>~} selects the atomic instantiation of \code{\verb~|X~}'s whole recursive group.} When wf-checking \code{\verb~|Arc<X>~}, a member whose type belongs to \code{\verb~|X~}'s SCC — the same def, or a mutually recursive partner (\code{\verb~|Tree~}/\code{\verb~|Forest~}) — is checked \em{as its arc'd version} instead of bare; the coinductive cycle rule then closes the recursion. Equivalently: the promotion rewrites the declaration into what would be written by hand (\code{\verb~|Cons(T, Arc<List<T>>)~}), one declaration serving both worlds:}
+
+\ul{
+\li{bare \code{\verb~|List<T>~}: the fast thread-local list, normal refcounts everywhere;}
+\li{\code{\verb~|Arc<List<T>>~}: the same declaration with every spine link atomic.}
+}
+
+\p{Promotion is \strong{automatic} — no \code{\verb~|Self~} keyword or per-member opt-in. Nothing expressible is lost: under static coloring, a bare same-group member behind an \code{\verb~|Arc~} could never be legal (it would have to be \code{\verb~|Sync~}), so for such a member the only possible meanings are \em{promoted} or \em{rejected}; auto-promotion turns a permanent error into the one meaning that can exist. An explicit-\code{\verb~|Self~} surface was considered and set aside: it cannot name a mutual-recursion partner, so the SCC rule is needed underneath regardless.}
+
+\p{Members \em{outside} the group are untouched — the §3 stratification still demands they be independently \code{\verb~|Sync~} (already \code{\verb~|Arc~}'d, sync cells, \code{\verb~|Sync~} value types). \code{\verb~|Cons~}'s head \code{\verb~|T~} is bounded exactly as before.}
+
+\p{\strong{The colored world is closed; conversion is an explicit rebuild.} \code{\verb~|Arc<List<T>>::Cons{h, t}~} requires \code{\verb~|t : Arc<List<T>>~} — an atomic list is built atomic from \code{\verb~|Nil~} up — and matching an \code{\verb~|Arc<List<T>>~} binds the tail at \code{\verb~|Arc<List<T>>~}. There is no implicit demotion, and no implicit promotion of an existing bare list: converting one is an O(n) deep rebuild, which stays user-written (a dedicated deep-copy operation may be added later, but is not committed here). The cost profile is the one already accepted in §1: an arc'd spine pays atomic refcounting from birth, where Koka would pay only after actual sharing.}
+
+\p{\strong{Representation: the whole-subtree rule.} Atomicity needs \em{no} record encoding at all — no per-member flag array, no colored record instances, no dual mangling. The \code{\verb~|Sync~} discipline guarantees nothing nonatomic is ever stored inside an atomically counted box, so a member link's atomic kind is the \strong{join of what the member type writes and what the parent context inherits}: the box's \code{\verb~|rc<…, atomic>~} floods its discipline down through \code{\verb~|rc.borrow~}/\code{\verb~|ref.project~} (interior references carry the parent's atomic kind), deriving every bare shared link, nullable wrapper, and value-record interior atomically — one \code{\verb~|List~} record type serves both colorings, and \code{\verb~|Arc<X>~} is \code{\verb~|rc<X's own record, shared, atomic>~} exactly as before. The only written atomicity is the \code{\verb~|Arc~} \em{island in normal space} (§3.1's explicit \code{\verb~|rc<…, shared, atomic>~} member type). Outlined drop/acquire glue forks per atomic kind (\code{\verb~|drop_in_place_atomic…~}), since the glue's body derives from its argument reference's kind.}
+
+\p{One consequence of context-carried coloring: a \strong{\code{\verb~|[value]~} intermediate} containing a bare same-group link cannot promote — loaded out of the box by value, nothing would carry its coloring, so its drop glue would release the link at the wrong discipline. The checker therefore folds value-record members outside the promotion group; such shapes are expressed with an explicit \code{\verb~|Arc~} member inside the value record instead. (Variant \em{arms} are the enum's own members and promote normally — \code{\verb~|Cons~}'s tail is the canonical case.)}
+}
+
+\subtree[design-thread-safety-s3-4]{
+\title{3.4 The built-in integers}
+
+\p{\code{\verb~|Nat~} and \code{\verb~|Int~} are counted handles of their own (a small value is an immediate, a large one a heap object), so they take the coloring directly: \code{\verb~|Arc<Nat>~} is the same integer with an atomically counted heap object, lowered to \code{\verb~|!rcgmp.mpz<atomic>~} with no further box. It has no members, so it is always well-formed and \code{\verb~|Sync~}; a bare \code{\verb~|Nat~} is not \code{\verb~|Sync~}.}
+
+\p{The coloring is a closed world, as for recursive records. Arithmetic, comparisons, literals, constructors and matching on \code{\verb~|Arc<Nat>~} stay in it: \code{\verb~|Arc<Nat>::Succ{n}~} takes \code{\verb~|n : Arc<Nat>~}, and matching binds \code{\verb~|Arc<Nat>~}. The integers' own constructors are their recursive group, so \code{\verb~|Int~}'s \code{\verb~|Nat~} payloads color too. A \code{\verb~|Nat~} field of a user record is not in that record's group: a record whose arc'd form should hold an integer declares the field \code{\verb~|Arc<Nat>~}. No cast converts between \code{\verb~|Nat~} and \code{\verb~|Arc<Nat>~}.}
+
+\p{Methods lift into the same world. A method of \code{\verb~|impl Nat~}/\code{\verb~|impl Int~} called on an \code{\verb~|Arc<Nat>~}/\code{\verb~|Arc<Int>~} receiver runs its \em{atomic instance}: the method with every \code{\verb~|Nat~}/\code{\verb~|Int~} it mentions colored, so \code{\verb~|a.gcd(b)~} with \code{\verb~|a : Arc<Nat>~} takes and returns \code{\verb~|Arc<Nat>~}. A method lifts when its signature is built from scalars, the integers and tuples of these, so the coloring maps it structurally; its body may hold integers only in the same positions (an integer stored in a record would keep its plain count beside the atomic one). The atomic instance is compiled where the method's body is, beside the plain one, and consumers only declare it.}
+}
+}
+
+\subtree[design-thread-safety-s4]{
+\title{4. Cells}
+
+\p{The MLIR cell lattice (\code{\verb~|CellKind~}): \code{\verb~|plain~}, \code{\verb~|exclusive~}, \code{\verb~|atomic~}, \code{\verb~|mutex~}, \code{\verb~|flatlock~}, \code{\verb~|rwlock~}. A cell is always managed through \code{\verb~|rc<cell<T, kind>>~}. The frontend currently surfaces only \code{\verb~|Cell~} (plain) and \code{\verb~|RefCell~} (exclusive); the sync kinds are reachable from MLIR and will get surface types with the bounds below.}
+
+\subtree[design-thread-safety-s4-1]{
+\title{4.1 \code{\verb~|Arc~} never applies to a cell}
+
+\p{\code{\verb~|Arc<Cell<…>>~} (any kind) is rejected — this is already enforced (\code{\verb~|arc_inner_rejection~}: "a cell"). Rationale: the atomicity of a cell is part of its \strong{kind}, not a coloring you stack on top.}
+
+\ul{
+\li{Sync-kind cells don't need \code{\verb~|Arc~}: the dialect \em{requires} them to live in an atomic shared box (\code{\verb~|CellType::requiresAtomicSharedBox~}, verified by \code{\verb~|RcType::verify~}) — they are born with exactly the discipline \code{\verb~|Arc~} would add, so \code{\verb~|Arc~} on them would be a redundant second discipline.}
+\li{Plain/exclusive cells must not get \code{\verb~|Arc~}: an atomic refcount on the box does nothing for the unsynchronized element store (\code{\verb~|cell.set~}) or the non-atomic exclusive in-use flag. \code{\verb~|Arc<RefCell<T>>~} is precisely Rust's canonical unsoundness example; the kind lattice makes it unrepresentable instead of merely rejected.}
+}
+
+\p{The two disciplines meet only by \em{composition}: interior mutability behind an arc is expressed by an \code{\verb~|Arc<X>~} whose member is a sync cell, never by wrapping a cell in \code{\verb~|Arc~}.}
+}
+
+\subtree[design-thread-safety-s4-2]{
+\title{4.2 Kind table}
+
+\table{
+\tr{\th{Kind}\th{\code{\verb~|Sync(cell)~}}\th{Element bound}\th{Element access}}
+\tr{\td{plain}\td{no}\td{any type}\td{\code{\verb~|get~} (clone) / \code{\verb~|set~} (replace)}}
+\tr{\td{exclusive}\td{no}\td{any type}\td{plain ops + \code{\verb~|rmw~} (move-out region, in-use flag, panics on reentry)}}
+\tr{\td{atomic}\td{yes}\td{signless int/float primitive, power-of-two width ≥ 8 bits (verified in \code{\verb~|ReussirTypes.cpp~})}\td{atomic \code{\verb~|get~} (acquire) / \code{\verb~|set~} (release) / \code{\verb~|rmw~} (direct \code{\verb~|atomicrmw~} or CAS-retry region, acq-rel)}}
+\tr{\td{mutex}\td{yes}\td{\strong{\code{\verb~|Sync(τ)~}}, and τ a valid memref element (rc pointer, primitive, or value record; nullables don't qualify)}\td{ops inside \code{\verb~|sync.mutex.critical_section~}; \code{\verb~|rmw~} region runs exactly once, reentry deadlocks}}
+\tr{\td{flatlock}\td{yes}\td{\strong{\code{\verb~|Sync(τ)~}}, memref-element}\td{ops inside \code{\verb~|sync.combining_lock.critical_section~}; the body may execute on the \em{combining thread}, results return via a captured stack slot}}
+\tr{\td{rwlock}\td{yes}\td{\strong{\code{\verb~|Sync(τ)~}}, memref-element}\td{\code{\verb~|get~}/\code{\verb~|rdlock~} under the read lock (concurrent), \code{\verb~|set~}/\code{\verb~|rmw~} under the write lock}}
+}
+}
+
+\subtree[design-thread-safety-s4-3]{
+\title{4.3 Why lock-guarded cells demand \code{\verb~|Sync(τ)~}, not something weaker}
+
+\p{Rust's \code{\verb~|Mutex<T>: Sync~} needs only \code{\verb~|T: Send~} because \code{\verb~|&T~} never escapes the lock. Reussir cannot reproduce that weaker bound, for a reason \strong{independent of how the accessor ops are implemented}:}
+
+\ul{
+\li{\strong{Stores.} Any thread may \code{\verb~|cell.set~} a value into the cell while retaining other rc handles to it (handles are duplicable; no linearity proves otherwise). If \code{\verb~|τ~} were not \code{\verb~|Sync~}, the storer's remaining handles and a later reader/dropper on another thread would race a normal refcount outside the lock. The lock guards the \em{slot}; it never guards the element's own count traffic.}
+\li{\strong{Escapes.} Symmetrically, any op that lets the element (or a clone of it) leave the critical section — \code{\verb~|cell.get~}/\code{\verb~|cell.rdlock~} return a clone; an \code{\verb~|rmw~} region can yield it as output — places the element's counts in unsynchronized hands once the value is out. With \code{\verb~|Sync(τ)~} those counts are atomic and this is fine.}
+}
+
+\p{To be precise about the lowering (verified in \code{\verb~|ConvertToSTD.cpp~} and \code{\verb~|AcquireDropExpansion.cpp~}): the acquire/drop that get/set/rmw/rdlock and the box drop glue perform always execute \em{inside} the critical section — it is the returned clone that subsequently lives outside the lock, and whose later drop happens on the caller's thread. That escape is designed behavior, not a defect, and it is exactly what the \code{\verb~|Sync(τ)~} bound makes sound. Even if the accessor surface were narrowed to region-only access, the bound would not weaken (the store argument above stands on its own).}
+
+\p{The bound also closes the smuggling hole from §1: a cell reachable from shared space can only ever \em{hold} \code{\verb~|Sync~} values, so no later store can leak a thread-local (normal-count) object across threads. This is the type-level analogue of Rust bounding \code{\verb~|Mutex<T>~}'s element rather than scanning values.}
+
+\p{For the common case, note the stratification does real work here: \code{\verb~|Mutex<Arc<FooBase>>~} is legal while \code{\verb~|Mutex<FooBase>~} is not — sharing a mutable slot of rc data means the data itself must be arc-colored.}
+}
+
+\subtree[design-thread-safety-s4-4]{
+\title{4.4 Sync cells without \code{\verb~|Arc~} (rule "some cells work sync/send style alone")}
+
+\p{A \code{\verb~|rc<cell<τ, mutex>, shared, atomic>~} (and its atomic/flatlock/rwlock siblings) is \code{\verb~|Sync~} by itself — it is \em{the} sanctioned primitive for sharing mutable state across threads, no \code{\verb~|Arc~} involved. \code{\verb~|Arc~} covers the immutable half of the world (records/arrays/closures shared read-only); sync cells cover the mutable half; composition (\code{\verb~|Arc<X>~} with sync-cell members) covers the rest.}
+}
+}
+
+\subtree[design-thread-safety-s5]{
+\title{5. Interaction summary}
+
+\pre{\verb~|
+Sync(τ)?
+  scalar / global str                       yes
+  Arc<X>            (WF: members Sync)      yes
+  Arc<Array<T>>     (WF: Sync(T))           yes
+  Arc<(A…)->R>      (WF: Sync(Aᵢ) + creation-site captures Sync)    yes
+  cell: atomic/mutex/flatlock/rwlock (element: Sync + kind bounds)  yes
+  [value] record                            iff all members Sync
+  Nullable<P>                               iff Sync(P)
+  bare [shared] record / array / closure    no
+  cell: plain / exclusive                   no
+  regional anything                         no (§6)
+
+Arc<·> applicable to:   [shared] records, arrays, closures   — nothing else
+Arc<cell>               never (kind carries atomicity instead)
+Arc nesting             never (already an arc)
+Arc member in a record  intended, blocked on per-member atomic axis (§3.1)
+Arc<recursive X>        WF via automatic SCC promotion — every same-group
+                        member link re-colors atomic (§3.3); closed world,
+                        bare→arc conversion is an explicit rebuild
+~}
+}
+
+\subtree[design-thread-safety-s6]{
+\title{6. Regional objects \em{(open, deliberately deferred)}}
+
+\p{Regional objects (\code{\verb~|flex~}, \code{\verb~|rigid~}, \code{\verb~|field~}, region handles) are \code{\verb~|!Sync~} and \code{\verb~|Arc~} rejects \code{\verb~|[regional]~} inners. Verona-style precedent says more is possible — a uniquely-entered region is transferable as a unit (\code{\verb~|iso~}), and a frozen region could be shareable once the rigid/SCC release path has an atomic variant. There is a working scheme for sync regional objects, but it is intentionally not designed here; until it is written down, the rule is simply that regions and threads do not mix.}
+}
+
+\subtree[design-thread-safety-s7]{
+\title{7. Implementation status and open items}
+
+\p{Implemented today:}
+
+\ul{
+\li{Frontend: \code{\verb~|TyKind::Arc~}, inner rejection table, arc construction for \code{\verb~|[shared]~} records, transparent reads, mono-time re-check of generic inners; \code{\verb~|Cell~}/\code{\verb~|RefCell~} surface types; reserved names.}
+\li{Dialect: full \code{\verb~|CellKind~} lattice with per-kind verifiers; atomic box axis with \code{\verb~|fetch_sub~} decrement discipline; sync-dialect lock lowerings (mutex/flatlock/rwlock critical sections); atomic-shared-box requirement for sync cells.}
+}
+
+\p{Not yet implemented (ordered roughly by dependency):}
+
+\ol{
+\li{\strong{\code{\verb~|Sync~} auto trait} — retire the Phase-0 \code{\verb~|Send~} declaration, keep \code{\verb~|Sync~} as the single predicate, and add its structural propagation + member-path diagnostics.}
+\li{~~Per-member atomic axis~~ — superseded and \strong{implemented} as the §3.3 whole-subtree rule: no record encoding at all; interior references inherit the box's atomic kind, \code{\verb~|Arc~} members are explicit \code{\verb~|rc<…, shared, atomic>~} member types, \code{\verb~|Arc<List<T>>~} is accepted with the whole spine atomic, and the SCC promotion ships in the \code{\verb~|Sync~} checker (\code{\verb~|semi/traits/sync.rs::recursive_group~}).}
+\li{\strong{\code{\verb~|Arc~} lowering} — implemented for records (atomic create, borrow, projection, dispatch, atomic drop/acquire glue); arc'd arrays and closures remain item 4.}
+\li{\strong{Arc construction for arrays and closures} (annotations are accepted; constructors don't exist), including the §3.2 creation-site capture check.}
+\li{~~Surface types for sync cells~~ — \strong{implemented}: \code{\verb~|Atomic<τ>~}, \code{\verb~|Mutex<τ>~}, \code{\verb~|FlatLock<τ>~}, \code{\verb~|RwLock<τ>~} with the §4.2 element bounds enforced at annotation/sweep/mono, the \code{\verb~|core::intrinsic::cell~} matrix over every kind, and \code{\verb~|rdlock~} read transactions. One narrowing: surface \code{\verb~|rmw~} is rejected on \code{\verb~|Atomic~} cells (the CAS-retry region must be effect-free, which a closure call is not) — dedicated atomic arithmetic intrinsics (\code{\verb~|fetch_add~}, …) are follow-up work.}
+\li{\em{(later)} escape hatches — an unsafe "assert Sync" for FFI types and an opt-out poison for structurally-Sync but thread-affine types (Rust \code{\verb~|unsafe impl~} / \code{\verb~|MutexGuard~} precedents); a linear closure kind (§3.2); sync regional objects (§6).}
+}
+}
+
+\subtree[design-thread-safety-appendix-comparison-map]{
+\title{Appendix: comparison map}
+
+\table{
+\tr{\th{}\th{Reussir}\th{Rust}\th{Swift}\th{Verona}\th{Koka/Perceus}}
+\tr{\td{predicate(s)}\td{\code{\verb~|Sync~} (single, = Rust's Send∧Sync)}\td{\code{\verb~|Send~} + \code{\verb~|Sync~}}\td{\code{\verb~|Sendable~} (single)}\td{none — per-reference capabilities}\td{none — runtime marking}}
+\tr{\td{where checked}\td{Arc WF + creation site + cell element bounds}\td{auto traits + API bounds (\code{\verb~|spawn: F: Send~})}\td{conformance + \code{\verb~|@Sendable~} capture check}\td{capability of each reference (\code{\verb~|iso~}/\code{\verb~|imm~} sendable, \code{\verb~|mut~} not)}\td{dynamic, on first share}}
+\tr{\td{atomicity granularity}\td{per box, at birth}\td{per type (\code{\verb~|Rc~} vs \code{\verb~|Arc~})}\td{n/a (ARC always atomic)}\td{per region}\td{per box, dynamic one-way}}
+\tr{\td{shared mutability}\td{sync cells (kind = discipline)}\td{\code{\verb~|Mutex~}/\code{\verb~|RwLock~}/atomics}\td{actors}\td{cowns + \code{\verb~|when~} behaviours}\td{none (pure)}}
+\tr{\td{cyclic data across threads}\td{deferred (§6)}\td{\code{\verb~|unsafe~}/arena}\td{SE-0414 region transfer}\td{\code{\verb~|iso~} region transfer, \code{\verb~|freeze~}}\td{n/a}}
+}
+
+\p{Key sources: Rustonomicon "Send and Sync"; std docs for \code{\verb~|Arc~}/\code{\verb~|Mutex~}/ \code{\verb~|RwLock~} (the \code{\verb~|RwLock: Sync ⇐ T: Send + Sync~} vs \code{\verb~|Mutex: Sync ⇐ T: Send~} distinction); Swift SE-0302 (\code{\verb~|Sendable~}, \code{\verb~|@Sendable~} capture rules) and SE-0414 (region-based isolation); Verona BoC (OOPSLA 2023, DOI 10.1145/3622852); Perceus TR (thread-safe RC with dynamic atomicity marking).}
+}

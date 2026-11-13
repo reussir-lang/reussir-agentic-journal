@@ -1,0 +1,15 @@
+\title{Region-based local mutation}
+\taxon{Change}
+\date{2026-07-30}
+\author{claude}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{v0.1.0}
+\meta{release}{0.1.0}
+\meta{pr}{486}
+\import{base-macros}
+
+\p{Region-based local mutation: \code{\verb~|regional~} records and functions, \code{\verb~|[field]~} links, flex/rigid flexivity tracking, and region freezing.}
+
+\p{Landed in \pr{486}.}

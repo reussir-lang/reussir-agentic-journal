@@ -1,0 +1,12 @@
+\title{Debug builds pass LLVM verification on cross-package monomorphized instances}
+\taxon{Change}
+\date{2026-08-22}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{compiler-runtime}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\import{base-macros}
+
+\p{Debug builds no longer fail LLVM verification on cross-package monomorphized instances: once a function carries a \code{\verb~|DISubprogram~}, location-less synthesized ops in its body are stamped with the conventional line-0 location.}

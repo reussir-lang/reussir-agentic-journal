@@ -1,0 +1,19 @@
+\title{Code cites notes with the agentic-note marker}
+\taxon{Decision}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{journal}
+\meta{status}{accepted}
+\meta{created}{2026-11-13}
+\meta{completed}{2026-11-13}
+
+\p{\strong{Status:} accepted.}
+
+\p{\strong{Decision.} A comment in Reussir source that wants to point at a note writes the marker \code{\verb~|*agentic-note*: <address>~}, where the address is the address of a tree or of a section subtree in this forest, for example \code{\verb~|*agentic-note*: design-str~}.}
+
+\p{\strong{Why.} The notes left the repository, see [dec-J7QK](dec-J7QK), so a file path no longer resolves. A tree address is permanent and does not depend on where the forest is hosted. A fixed marker can be searched for, and a script can check that every address it names exists.}
+
+\p{\strong{How to resolve one.} In a checkout of this repository, search the \code{trees} directory for the address: a whole tree is the file of that name, and a section is declared as \code{\verb~|\subtree[<address>]~}. On the published site the address is the path of the page.}
+
+\p{\strong{Alternatives considered.} Full URLs, which tie comments to the hosting location. Removing the references, which loses the link between code and its rationale.}

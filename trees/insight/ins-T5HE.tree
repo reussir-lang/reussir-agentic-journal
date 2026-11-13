@@ -1,0 +1,15 @@
+\title{Building Forester 6.0 with Nix: use the glibc package and thaw the output}
+\taxon{Insight}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{journal}
+\tag{tooling}
+
+\p{Source: [ses-K3QF](ses-K3QF). Verified on x86_64 Linux.}
+
+\ul{
+\li{The default package of the Forester 6.0 flake is a static musl build. It compiles its own OCaml 5.5.2 and runs the compiler test suite, which failed with 143 failing tests inside the Nix sandbox and took the whole build down with it. The glibc package, \code{\verb~|legacyPackages.<system>.forester~}, uses the compiler from nixpkgs and built on the first attempt.}
+\li{The upstream binary cache had no build of the 6.0 tag, and a user who is not a trusted Nix user cannot add the cache anyway. Plan for a source build.}
+\li{Forester copies its bundled theme from the Nix store into \code{output} and keeps the read-only permissions. The next \code{forester build} then fails with permission errors and an unexpected-problem report. Run \code{\verb~|chmod -R u+w output~} first; the \code{journal-build} and \code{journal-serve} commands do this.}
+}

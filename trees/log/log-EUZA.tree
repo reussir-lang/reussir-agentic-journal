@@ -1,0 +1,15 @@
+\title{Record fields carry visibility}
+\taxon{Change}
+\date{2026-08-02}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{496}
+\import{base-macros}
+
+\p{Record fields now carry visibility: fields default to private and accept a leading \code{\verb~|pub~} marker. A private field is accessible (projection, assignment, construction) only from the record's defining module and its descendant modules, inside a package and across packages alike; the marker round-trips through HIR text and ships in \code{\verb~|.rri~} interfaces. Enum-variant payloads are unaffected — variants stay exactly as visible as their enum.}
+
+\p{Landed in \pr{496}.}

@@ -1,0 +1,15 @@
+\title{Prelude intrinsics}
+\taxon{Change}
+\date{2026-07-30}
+\author{claude}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{v0.1.0}
+\meta{release}{0.1.0}
+\meta{pr}{486}
+\import{base-macros}
+
+\p{Prelude intrinsics: cells (with synchronized variants), \code{\verb~|Arc~}, \code{\verb~|Nullable~} links, fixed-size multidimensional arrays, math intrinsics, and \code{\verb~|#[main]~} entry points.}
+
+\p{Landed in \pr{486}.}

@@ -1,0 +1,14 @@
+\title{\code{\verb~|WavlSet~} and \code{\verb~|WavlMap~} carry the hash containers' interface}
+\taxon{Change}
+\date{2026-08-11}
+\author{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{565}
+\import{base-macros}
+
+\p{\code{\verb~|WavlSet~} and \code{\verb~|WavlMap~} now carry the same interface as the hash containers, plus the operations only an ordered container can offer. Shared with \code{\verb~|HashSet~}/\code{\verb~|HashMap~}: \code{\verb~|singleton~}, \code{\verb~|clear~}, \code{\verb~|get~}/\code{\verb~|get_entry~}, \code{\verb~|take~}/\code{\verb~|remove_entry~}, \code{\verb~|insert_result~}, \code{\verb~|insert_with~}, \code{\verb~|adjust~}, \code{\verb~|update~}, \code{\verb~|alter~}, \code{\verb~|keys~}, \code{\verb~|values~}, \code{\verb~|filter~}, \code{\verb~|filter_map~}, \code{\verb~|map~}, \code{\verb~|map_values~}, \code{\verb~|map_keys~}, \code{\verb~|map_entries~}, \code{\verb~|count_if~}, \code{\verb~|any~}, \code{\verb~|all~}, \code{\verb~|find~}, the set and map algebra (\code{\verb~|union~}, \code{\verb~|union_with~}, \code{\verb~|intersection~}, \code{\verb~|intersection_with~}, \code{\verb~|difference~}, \code{\verb~|symmetric_difference~}), the containment relations, and \code{\verb~|PartialEq~}/\code{\verb~|Eq~}. Ordered-only: \code{\verb~|min~}/\code{\verb~|max~} gain \code{\verb~|pop_min~}/\code{\verb~|pop_max~}, the neighbour queries \code{\verb~|floor~}, \code{\verb~|ceiling~}, \code{\verb~|predecessor~}, \code{\verb~|successor~} (\code{\verb~|*_entry~} on the map), the half-open window queries \code{\verb~|range~} and \code{\verb~|range_to_list~}, the descending traversals \code{\verb~|to_list_desc~} and \code{\verb~|fold_right~}, and \code{\verb~|depth~}, which reports the tree height so the balance bound is observable from outside the module.}
+
+\p{Landed in \pr{565}.}

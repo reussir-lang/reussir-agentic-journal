@@ -1,0 +1,15 @@
+\title{\code{\verb~|rene~}, the package manager}
+\taxon{Change}
+\date{2026-07-30}
+\author{claude}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{tooling}
+\tag{v0.1.0}
+\meta{release}{0.1.0}
+\meta{pr}{486}
+\import{base-macros}
+
+\p{\code{\verb~|rene~}, the package manager: Nickel manifests, path dependencies with pubgrub version solving, cross-package builds with a process pool (\code{\verb~|-j~}), profiles, machine targets (\code{\verb~|--target~}), product selection (\code{\verb~|--bin~}/\code{\verb~|--lib~}), freshness tracking, and JSON introspection (\code{\verb~|rene inspect~}).}
+
+\p{Landed in \pr{486}.}

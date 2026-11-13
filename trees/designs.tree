@@ -1,0 +1,33 @@
+\title{Design notes}
+
+\p{Design notes for the Reussir compiler, runtime and tooling, listed collapsed in alphabetical order. A note describes how a feature is meant to work and why; its sections are addressable subtrees.}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{design-bundled-library-cache}
+\transclude{design-closure-wpd}
+\transclude{design-device-array-transfers}
+\transclude{design-dynamic-extent-arrays}
+\transclude{design-ifrt-build}
+\transclude{design-import}
+\transclude{design-kernel-async}
+\transclude{design-kernel-functions}
+\transclude{design-kernel-launch}
+\transclude{design-linear-recurrence}
+\transclude{design-nonlinear-ffi-instrumentation}
+\transclude{design-ownership-analysis}
+\transclude{design-per-constructor-box-sizing}
+\transclude{design-polymorphic-ffi}
+\transclude{design-rri}
+\transclude{design-stablehlo-async-types}
+\transclude{design-stablehlo-build}
+\transclude{design-str}
+\transclude{design-system-rust-runtime}
+\transclude{design-tensor-kernels}
+\transclude{design-tensor-operations}
+\transclude{design-thread-safety}
+\transclude{design-token-reuse-remarks}
+\transclude{design-trait-system}
+\transclude{design-tuples}
+\transclude{design-while-expressions}
+}

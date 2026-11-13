@@ -1,0 +1,12 @@
+\title{\code{\verb~|str~} is usable, not just constructible}
+\taxon{Change}
+\date{2026-08-22}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\import{base-macros}
+
+\p{\code{\verb~|str~} is now usable, not just constructible (see [design-str](design-str): \code{\verb~|str~} is exactly the immutable static literal; growable strings stay outside the language behind the FFI). String literals gain the read intrinsics \code{\verb~|core::intrinsic::str::{len, byte_at, slice}~} (byte granularity, checked/clamped), the full builtin comparison tower (\code{\verb~|==~}/\code{\verb~|!=~}/orderings/\code{\verb~|cmp~} via new \code{\verb~|reussir.str.equal~} and \code{\verb~|reussir.str.compare~} ops, expanded inline in \code{\verb~|convert-to-std~}: \code{\verb~|scf~} fast paths — \code{\verb~|str.ref_eq~} view identity and the length gate — around a \code{\verb~|memcmp~} call through the \code{\verb~|str.unsafe_memcmp~} residue), record-field placement (\code{\verb~|str~} now carries a data layout and is trivially copyable), and FFI crossing: a \code{\verb~|str~} parameter or return renders as the runtime's \code{\verb~|#[repr(C)]~} \code{\verb~|collections::string::Str<'static>~}, bit-identical to the lowered \code{\verb~|{ptr, len}~} pair. With \code{\verb~|std::hash::Hash for str~} (a runtime content digest fed to the caller's hasher) a string literal keys every container: the hash containers hash it on the Reussir side, and the Rust-backed ordered containers order the runtime \code{\verb~|Str~} byte-wise, matching \code{\verb~|str.compare~}.}

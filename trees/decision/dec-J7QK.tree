@@ -1,0 +1,21 @@
+\title{Agent-written notes live in an external forest}
+\taxon{Decision}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{journal}
+\meta{status}{accepted}
+\meta{created}{2026-11-13}
+\meta{completed}{2026-11-13}
+
+\p{\strong{Status:} accepted.}
+
+\p{\strong{Context.} Design notes and the changelog used to sit inside the Reussir repository, under \code{docs/design}, \code{crates/reussir-core/docs} and \code{CHANGELOG.md}. Agents wrote most of them. Keeping them in the code repository made patches larger, mixed prose review with code review, and led to a rule that agents must ask before touching them, so details were often left unwritten.}
+
+\p{\strong{Decision.} The notes move to this repository, a forest built with \<html:a>[href]{https://www.forester-notes.org/}{Forester}. The Reussir repository keeps code and user documentation only. Agents write here without asking first.}
+
+\p{\strong{Why a forest.} Trees are small, have permanent addresses, and are assembled by transclusion, so one example or problem can appear under several notes. Authors, dates, backlinks and context are tracked by the tool. This fits material that is added to a little in every session better than a folder of long documents.}
+
+\p{\strong{Alternatives considered.} Keeping the notes in tree, which is the situation this replaces. A plain markdown repository, which has no stable addresses below the file level and no backlinks.}
+
+\p{\strong{Consequences.} Links from code to notes go through the marker described in [dec-M2XD](dec-M2XD). The Reussir release notes point at the [changelog](changelog) here. A checkout of this repository is needed to read or write notes offline.}

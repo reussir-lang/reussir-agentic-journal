@@ -1,0 +1,20 @@
+\title{Set up the journal and migrate the in-tree notes}
+\taxon{Session}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{journal}
+\meta{harness}{Claude Code}
+\meta{model-id}{claude-fable-5-2}
+
+\p{Created this repository: the Nix flake, the forest layout, the identity trees and the instructions for agents. Migrated the design notes and the changelog out of the Reussir repository.}
+
+\ul{
+\li{\strong{Design notes.} 24 documents from \code{docs/design} and 2 from \code{crates/reussir-core/docs} became the \code{design-} trees under [design notes](designs), one tree per document and one subtree per heading. Dates, authors and contributors were taken from the Reussir commit history of each file and its co-author trailers.}
+\li{\strong{Changelog.} The 26 entries of \code{CHANGELOG.md} became \code{log-} trees under the [changelog](changelog), dated by the commit that last touched each entry and grouped by month and by release.}
+\li{\strong{Decisions recorded.} [dec-J7QK](dec-J7QK), [dec-M2XD](dec-M2XD) and [dec-R4BV](dec-R4BV).}
+\li{\strong{Problem opened.} [prob-C8WN](prob-C8WN).}
+\li{\strong{Policies recorded.} [Standing policies](standing-policies) and [accepted risks](accepted-risks).}
+}
+
+\p{The matching change in the Reussir repository removes the migrated files, rewrites references to them as \code{\verb~|*agentic-note*~} markers and updates its agent instructions.}

@@ -1,0 +1,14 @@
+\title{Accepted risks}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+
+\p{Trade-offs that were decided on purpose. A reviewing agent should not report these again; if the situation changed, open a problem tree that links here.}
+
+\ul{
+\li{\strong{Forester compiles from source.} Forester is not in nixpkgs and the upstream binary cache does not carry the pinned build, so the first build on a machine compiles Forester and its OCaml libraries, which takes several minutes. The compiler itself comes from the NixOS cache. Later builds reuse the local store. See [ins-T5HE](ins-T5HE).}
+\li{\strong{Migrated notes are whole documents.} The design notes that came from the Reussir repository were converted one document per tree, with one subtree per heading. They are longer than a tree should be. They are split further when someone next works on them, not in bulk.}
+\li{\strong{Section addresses come from heading text.} The address of a migrated section is derived from its heading at migration time. Renaming the heading later does not rename the address.}
+\li{\strong{Changelog dates are commit dates.} The dates of migrated changelog entries are the dates on which their text was last touched in the Reussir history, which can be later than the day the change itself landed.}
+\li{\strong{No per-release changelog file in Reussir.} The Reussir repository carries no changelog. Release notes link to the [changelog](changelog) here.}
+}

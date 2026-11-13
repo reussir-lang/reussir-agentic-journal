@@ -1,0 +1,12 @@
+\title{New \code{\verb~|std::collections::cow~} module}
+\taxon{Change}
+\date{2026-08-22}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\import{base-macros}
+
+\p{New \code{\verb~|std::collections::cow~} module: copy-on-write \code{\verb~|HashMap~} and \code{\verb~|HashSet~} backed by the runtime's hashbrown table (\code{\verb~|reussir_rt::collections::{hash_map, hash_set}~}, built on \code{\verb~|hashbrown::HashTable~}). Keys hash on the Reussir side with \code{\verb~|FastHasher~} and the digest crosses the FFI boundary with the key, so the runtime never hashes: each entry caches its digest, growth and the copy-on-write clone reuse it, and key equality — bridged to the Reussir \code{\verb~|Eq~} impl — is consulted only when the cached digests match. Core operations for both containers: \code{\verb~|new~}, \code{\verb~|with_seed~}, \code{\verb~|singleton~}, \code{\verb~|len~}, \code{\verb~|is_empty~}, \code{\verb~|clear~}, \code{\verb~|insert~}, \code{\verb~|get~}/\code{\verb~|contains~}, \code{\verb~|remove~}. Prefer them for linear build-query-discard usage; retained versions pay a full-table clone per divergence, where the \code{\verb~|pure~} tries share.}

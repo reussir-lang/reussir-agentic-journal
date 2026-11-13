@@ -1,0 +1,356 @@
+\title{Ownership Analysis (Full MIR)}
+\taxon{Design}
+\date{2026-06-28}
+\author{claude-opus-4-8}
+\contributor{schrodingerzy}
+\contributor{claude-opus-5-5}
+\tag{design}
+\meta{created}{2026-06-28}
+\meta{updated}{2026-10-24}
+\meta{origin}{crates/reussir-core/docs/ownership-analysis.md}
+\import{base-macros}
+
+\blockquote{
+\p{Status: \strong{design / proposed} (pm/07). This is a fresh Perceus-style analysis, not a port of the Haskell \code{\verb~|Reussir.Core.Ownership~} (which used a forward ledger + flux). We keep only its vocabulary (RR types, before/after annotations).}
+}
+
+\subtree[design-ownership-analysis-s1]{
+\title{1. Goal & scope}
+
+\p{Insert reference-counting operations — \code{\verb~|dup~} (\code{\verb~|rc.inc~}) and \code{\verb~|drop~} (\code{\verb~|rc.dec~} / \code{\verb~|ref.drop~}) — onto the Full MIR so that \strong{every resource-relevant (RR) value is freed exactly once}, with \code{\verb~|drop~}s placed \strong{as early as possible} so the backend \code{\verb~|TokenReuse~} pass can pair a freed token with a same-layout allocation.}
+
+\p{In scope: \strong{shared rc, rigid rc, regional values, closures, and any container that transitively holds one of those} (the RR set). Out of scope here:}
+
+\ul{
+\li{emitting MLIR — that is codegen (pm/08), which \em{consumes} this analysis;}
+\li{the backend reuse pairing — already a backend pass; the frontend only has to emit \code{\verb~|drop~}s early and near allocations.}
+}
+}
+
+\subtree[design-ownership-analysis-s2]{
+\title{2. The ownership discipline}
+
+\ul{
+\li{\strong{Owned calling convention.} A function owns its RR parameters (the caller transfers ownership in). It must consume-or-drop each owned RR value exactly once. The return value is moved out — owned by the caller, never dropped.}
+\li{\p{\strong{Last use is the pivot.} For a use of RR variable \code{\verb~|x~}:}
+\ul{
+\li{last use → \strong{move} (consume; no \code{\verb~|dup~}), \code{\verb~|x~} becomes dead;}
+\li{non-last use → \strong{\code{\verb~|dup x~}} before the use, keep ownership;}
+\li{a var that goes dead without being consumed (bound-but-unused, or dead after a branch) → \strong{\code{\verb~|drop x~}} at the earliest dead point.}
+}}
+\li{\strong{Borrow ≠ own.} Reading a field (\code{\verb~|Proj~}) borrows from the parent; if the borrowed RR value escapes as owned, \strong{\code{\verb~|dup~}} it — the parent still owns the original.}
+}
+
+\p{We start with the \strong{owned} discipline only (no borrowed-parameter optimization). That is the simplest correct base; borrow-passing is a later refinement.}
+}
+
+\subtree[design-ownership-analysis-s3]{
+\title{3. The RR-type predicate}
+
+\pre{\verb~|
+is_rr(ty) =
+  match ty.kind():
+    Record{def, args, flex} =>
+        match record_table.shape(def, args).managed:      // Value | Shared | Regional
+            Shared   => true                              // always rc-managed
+            Value    => any field is_rr                   // transitive
+            Regional => flex == Rigid                     // rc only when frozen out
+    Closure{..}      => true            // owns a captured environment
+    Nullable(inner)  => is_rr(inner)
+    Int | Float | Bool | …             => false
+~}
+
+\ul{
+\li{\strong{Two axes — management and flexivity.} A record's \strong{rc-management} (is it heap reference-counted, region-allocated, or inline by value) is what the elaborator stores in \code{\verb~|ctxt::Record.default_cap~} (\code{\verb~|Value | Shared | Regional~}) and the \code{\verb~|RecordTable~} carries forward, keyed by the canonical (flexivity-erased) record type. A \code{\verb~|Ty~}'s \strong{flexivity} (\code{\verb~|Regional~}/\code{\verb~|Flex~}/\code{\verb~|Rigid~}, or \code{\verb~|Irrelevant~} for any non-regional record) is the orthogonal \em{regional value coloring}. The flexivity cannot, on its own, say "is this rc'd": \code{\verb~|[value]~}/\code{\verb~|[shared]~} both erase to \code{\verb~|Irrelevant~} (\code{\verb~|ty_eval.rs~}), so management must come from the table.}
+\li{\p{\strong{The two axes meet in exactly one case: a \code{\verb~|Regional~} record.} A region-allocated value is freed \em{en masse} when its region is torn down — no per-object rc — \strong{unless} it has been frozen to \code{\verb~|Rigid~}, which lifts it into a managed (reference-counted) object that escapes the region. So a \code{\verb~|Regional~} record is RR iff its flexivity is \code{\verb~|Rigid~}; a region-local \code{\verb~|Flex~} (or unrefined \code{\verb~|Regional~}) value needs no \code{\verb~|dup~}/\code{\verb~|drop~}. \code{\verb~|Shared~} is always RR and \code{\verb~|Value~} is transitive, independent of flexivity. The table is \code{\verb~|canonical-Ty → RecordShape { managed, fields }~}.}
+\ul{
+\li{\em{Managed fields of a region-local record are still rc'd.} The flex container itself takes no ops, but a \code{\verb~|Shared~}/\code{\verb~|Rigid~} field it is assembled from is an ordinary RR value — \code{\verb~|dup~}'d if the source stays live, moved (ownership transferred to the field, dec'd by region teardown) if it is a last use. Container-unmanaged never means field-unmanaged.}
+}}
+\li{Memoized per interned \code{\verb~|Ty~} (pointer-identity key — types are arena-interned); a provisional \code{\verb~|false~} guards the (illegal but defensively-handled) value-record field cycle.}
+\li{The pass takes the \code{\verb~|RecordTable~} as an explicit argument (\code{\verb~|analyze_function(tcx, &Function, &RecordTable)~}); the test harness builds it directly, and the real pipeline will populate it from \code{\verb~|mono~}'s record table when codegen wires the analysis in (pm/08). The MIR \code{\verb~|Program~} need not grow new ser/de surface for this.}
+}
+}
+
+\subtree[design-ownership-analysis-s4]{
+\title{4. Anchors: recording op positions on an immutable MIR}
+
+\p{The MIR is immutable and \code{\verb~|mir::Expr~} (\code{\verb~|{kind, ty, span}~}) carries no id.}
+
+\p{\strong{Decision (locked): add \code{\verb~|pub id: ExprId~} to \code{\verb~|mir::Expr~}} (\code{\verb~|ExprId(u32)~}; the type already exists in \code{\verb~|semi::hir~}).}
+
+\ul{
+\li{Stamped at the two allocation choke points — \code{\verb~|mir/build.rs::expr_ref~} and \code{\verb~|mono.rs~} — via a single monotonic counter on the build/mono context. One helper (\code{\verb~|mk_expr~}) becomes the only site that assigns ids.}
+\li{The textual printer \strong{need not emit ids}; they are regenerated deterministically on parse, so round-trip soundness is preserved (ids are not semantic content).}
+}
+
+\p{Alternatives considered and rejected:}
+
+\ul{
+\li{\strong{Arena pointer-identity} (\code{\verb~|*const Expr~} as key): zero IR change, but unidiomatic, undebuggable, and breaks if a node is ever copied / re-interned.}
+\li{\strong{Traversal-order index} (the i-th visited expr): no field, but couples the analysis and codegen to walk in lock-step — fragile.}
+}
+
+\p{Explicit \code{\verb~|ExprId~} is robust, debuggable (\code{\verb~|id → action~} is printable), and survives traversal changes. The cost is a contained build/mono ripple.}
+
+\p{\strong{Non-\code{\verb~|Expr~} positions.} Match arm bodies and \code{\verb~|Let~} are \code{\verb~|Expr~}s, so they anchor directly. Operations with no natural \code{\verb~|Expr~} — dropping a variant shell at a switch, dropping an unused parameter — attach to the nearest \code{\verb~|Expr~}'s \code{\verb~|before~}/\code{\verb~|after~} list (arm-body \code{\verb~|before~}, function-body root). Match-internal anchoring is resolved in the control-flow increment.}
+}
+
+\subtree[design-ownership-analysis-s5]{
+\title{5. Output data model}
+
+\p{A side-table — the MIR stays immutable; codegen does lookups.}
+
+\pre{\verb~|
+pub struct OwnershipTable { actions: HashMap<ExprId, Action> }
+
+pub struct Action { pub before: Vec<RcOp>, pub after: Vec<RcOp> }
+
+pub enum RcOp {
+    Dup(VarId),
+    Drop(VarId),
+    // grows later: DropField(VarId, Path), …
+}
+~}
+
+\p{Timeline per expression: \code{\verb~|[before ops] → evaluate expr → [after ops]~}. Codegen (\code{\verb~|reussir-codegen::lower~}) consults \code{\verb~|table.get(expr.id)~} around each node.}
+}
+
+\subtree[design-ownership-analysis-s6]{
+\title{6. The algorithm}
+
+\p{Two passes over each function body, pure (no MLIR):}
+
+\p{\strong{Pass A — free RR variables (bottom-up).} \code{\verb~|free(e): BitSet<VarId>~} = the RR vars referenced in \code{\verb~|e~}, memoized per \code{\verb~|ExprId~}. Drives last-use detection.}
+
+\p{\strong{Pass B — placement (top-down, continuation liveness).} Threads \code{\verb~|live_after~} sets through the tree and emits \code{\verb~|Dup~}/\code{\verb~|Drop~} per the rules below.}
+
+\subtree[design-ownership-analysis-s6-1]{
+\title{6.1 Last-use detection — structured backward liveness, one pass, no fixpoint}
+
+\p{\strong{Approach: a structured, syntax-directed backward pass — a \em{degenerate} liveness dataflow that converges in a single sweep — rather than an iterative CFG worklist.}}
+
+\p{\em{Why one pass is exact.} A function body is a tree whose only control constructs are \code{\verb~|Seq~}, \code{\verb~|Let~}, \code{\verb~|If~}, and \code{\verb~|Match~}. None of them loop: intra-function iteration does not exist in the MIR — repetition is recursion through \code{\verb~|Call~}, which is a dataflow \strong{leaf} (it neither defines nor keeps the caller's locals alive beyond its own argument list). The induced control-flow graph is thus a DAG, and backward liveness over a DAG is exact after one reverse-topological visit; for a structured tree, reverse-topological order \em{is} right-to-left / post-order. So we never build an explicit CFG and never iterate to a fixpoint — distinguishing this from general dataflow, which needs a worklist precisely because of back-edges.}
+
+\p{\em{What we track.} Liveness of \strong{named RR variables only} (parameters + \code{\verb~|Let~} bindings). Unnamed intermediate RR values are owned temporaries threaded by the tree itself — each is immediately consumed (arg/ctor position), bound (\code{\verb~|Let~}), returned (moved), or discarded (a non-final \code{\verb~|Seq~} statement → \code{\verb~|Drop~}) — so they never enter the liveness set.}
+
+\p{\em{The quantity.} \code{\verb~|live_after(e)~} = the set of named RR vars used anywhere in \code{\verb~|e~}'s dynamic continuation (everything that runs after \code{\verb~|e~}, within the function). A use of \code{\verb~|x~} at \code{\verb~|e~} is its \strong{last use} ⟺ \code{\verb~|x ∉ live_after(e)~}.}
+
+\p{\em{Threading rules} (each child's \code{\verb~|live_after~} is its right-siblings' \code{\verb~|free~} sets ∪ the parent's \code{\verb~|live_after~}):}
+
+\ul{
+\li{\code{\verb~|Seq([s₀..sₙ])~} under live \code{\verb~|L~}: \code{\verb~|live_after(sₙ) = L~}; \code{\verb~|live_after(sᵢ) = free(sᵢ₊₁) ∪ … ∪ free(sₙ) ∪ L~}.}
+\li{\code{\verb~|Let{x, value}~} with continuation \code{\verb~|k~}: \code{\verb~|live_after(value) = live(k)~}; \code{\verb~|x~} is granted after \code{\verb~|value~}, so \code{\verb~|x ∈ live(k)~} ⟺ used later.}
+\li{\code{\verb~|Call~}/\code{\verb~|Ctor~}/\code{\verb~|Variant{args=[a₀..aₖ]}~} under \code{\verb~|L~}: \code{\verb~|live_after(aᵢ) = free(aᵢ₊₁) ∪ … ∪ free(aₖ) ∪ L~}. ⇒ a var reused in a later argument is live after the earlier occurrence, so the earlier one is \strong{not} a last use and gets a \code{\verb~|Dup~} — the \code{\verb~|foo(x, x)~} case falls straight out.}
+\li{\code{\verb~|If(c, t, e)~} under \code{\verb~|L~}: \code{\verb~|live_after(c) = free(t) ∪ free(e) ∪ L~}; \code{\verb~|live_after(t) = live_after(e) = L~}.}
+\li{\code{\verb~|Match(scrut, dt)~}: like \code{\verb~|If~} over the arms; \code{\verb~|live_after(scrut) = (⋃ free(armᵢ)) ∪ L~}.}
+}
+
+\p{\em{Conditional (path-dependent) last use} is handled by branch reconciliation, not a separate mechanism. Two canonical cases:}
+
+\ul{
+\li{\strong{Dies on one path.} \code{\verb~|let x; if c { use(x) } else { /* x unused */ }~} with \code{\verb~|x ∉ L~}: \code{\verb~|x ∈ free(then)~}, \code{\verb~|x ∉ free(else)~} ⇒ \code{\verb~|Drop(x)~} in the \code{\verb~|else~} arm; in \code{\verb~|then~}, \code{\verb~|use(x)~} sees \code{\verb~|x ∉ live_after (= L)~} ⇒ move. Both paths leave \code{\verb~|x~} settled.}
+\li{\strong{Used in a branch \em{and} after.} \code{\verb~|let x; if c { use(x) } else { use(x) }; use(x)~} with \code{\verb~|x ∈ L~}: inside each arm \code{\verb~|live_after(use x) = L ∋ x~} ⇒ \strong{not} a last use ⇒ \code{\verb~|Dup(x)~}; the trailing \code{\verb~|use(x)~} has \code{\verb~|x ∉ live_after~} ⇒ move. The rc stays balanced (enter 1 → arm \code{\verb~|dup~} 2 → arm-use 1 → trailing-use 0), and only the taken arm's \code{\verb~|dup~} runs.}
+}
+
+\p{\em{Representation.} \code{\verb~|VarId~}s are dense per function, so live sets are fixed-width \strong{bitsets} (union/diff/membership in O(words)); \code{\verb~|free(e)~} is computed once bottom-up and memoized per \code{\verb~|ExprId~}; \code{\verb~|live_after~} is threaded top-down and only materialized where an op is emitted.}
+}
+
+\subtree[design-ownership-analysis-s6-2]{
+\title{6.2 Placement rules}
+
+\p{\code{\verb~|place(e, live_after)~} reads off the live-after sets above and emits, per MIR form:}
+
+\table{
+\tr{\th{Form}\th{Rule}}
+\tr{\td{\code{\verb~|Var(x)~} (RR)}\td{\code{\verb~|x ∈ live_after~} ⇒ \code{\verb~|before: Dup(x)~}; else move (last use).}}
+\tr{\td{\code{\verb~|Seq([s0..sn])~}}\td{right-to-left; \code{\verb~|live_after(sᵢ) = ⋃_{j>i} free(sⱼ) ∪ outer~}. A \code{\verb~|Let~}-bound \code{\verb~|x~} unused later ⇒ \code{\verb~|Drop(x)~} in the let's \code{\verb~|after~}. A non-final statement producing an unbound/unconsumed RR value ⇒ \code{\verb~|Drop~} its result. \code{\verb~|sn~} is moved out.}}
+\tr{\td{\code{\verb~|Let{x, value}~}}\td{\code{\verb~|value~} placed with \code{\verb~|x~}'s downstream liveness; binding grants ownership of \code{\verb~|x~}.}}
+\tr{\td{\code{\verb~|If(c,t,e)~} / \code{\verb~|Match~}}\td{\strong{branch reconciliation} — both arms must exit owning the same set. Per arm: owned-on-entry but unused-in-arm and not-needed-after ⇒ \code{\verb~|Drop~} inside that arm; needed-after but consumed-in-arm ⇒ \code{\verb~|Dup~} as needed. Balanced ownership at the join.}}
+\tr{\td{\code{\verb~|Call~}/\code{\verb~|Ctor~}/\code{\verb~|Variant~}/\code{\verb~|ClosureCall~} args}\td{each arg position consumes its value; a var in ≥2 arg positions ⇒ \code{\verb~|Dup~} on all but the last occurrence (left-to-right).}}
+\tr{\td{\code{\verb~|Proj(e, path)~}}\td{borrow; if the projected RR field escapes as owned, \code{\verb~|before: Dup~} it. Parent's drop is unaffected (dropped at its own last use).}}
+\tr{\td{\code{\verb~|Closure{captures}~}}\td{creating the closure consumes its captures (dup any still live afterwards). Closure drop-glue is the backend's.}}
+\tr{\td{\code{\verb~|RegionRun~} / regional}\td{result owned; detailed region lifecycle deferred.}}
+}
+
+\p{\strong{Early-drop / reuse.} The rules above already drop at last-use / dead-branch (not deferred to function end), which is "early". A dedicated \strong{drop-specialization} refinement — push \code{\verb~|drop~} into match arms and just after a destructuring \code{\verb~|Proj~}, so the freed token sits right before a sibling allocation — is staged separately; the backend \code{\verb~|TokenReuse~} does the actual pairing, so the frontend only needs the dec emitted at the destructure point.}
+}
+}
+
+\subtree[design-ownership-analysis-s7]{
+\title{7. Operational semantics (sequent calculus)}
+
+\p{Judgment \code{\verb~|L ⊢ e ⤳ 𝒜~}: "with continuation-live set \code{\verb~|L~}, expression \code{\verb~|e~} annotates to actions \code{\verb~|𝒜~}." Representative rules (the full set ships as module doc-comments, one sequent per MIR form, checkable against the code):}
+
+\pre{\verb~|
+x ∈ L                                   x ∉ L
+─────────────────── [Var-Shared]        ─────────────────── [Var-LastUse]
+L ⊢ x ⤳ {before: dup x}                 L ⊢ x ⤳ {}
+
+L ⊢ e ⤳ 𝒜     x ∉ free(rest)
+──────────────────────────────────────────────── [Let-Dead]
+L ⊢ (let x = e; rest) ⤳ 𝒜 ⊕ {after: drop x}
+
+L_t = L│t     L_e = L│e     Δ owned at join
+──────────────────────────────────────────── [If-Reconcile]
+L ⊢ if c t e ⤳ balance(Δ, t, e)
+~}
+
+\subtree[design-ownership-analysis-s7-1]{
+\title{7.1 Relation to Tree Borrows (design inspiration)}
+
+\p{Tree Borrows (Villani, Hostert, Dreyer, Jung; PLDI 2025 — the successor to Stacked Borrows as Rust's aliasing model) gives each \em{(location, reference)} a \strong{permission state} in a small lattice and transitions it on every access, propagating the effect along a \strong{tree of derivations} — each reference is a node whose parent is the reference it was derived from. Its states:}
+
+\ul{
+\li{\strong{Reserved} — a fresh \code{\verb~|&mut~} not yet written; tolerates \em{foreign} reads.}
+\li{\strong{Active} — written through; enforces uniqueness, so a foreign read demotes it.}
+\li{\strong{Frozen} — read-only (shared).}
+\li{\strong{Disabled} — any further access is undefined behavior.}
+}
+
+\p{Transitions: a \em{child} write \code{\verb~|Reserved → Active~}; a \em{foreign} read \code{\verb~|Active → Frozen~}; a \em{foreign} write \code{\verb~|* → Disabled~}.}
+
+\p{We borrow three \em{ideas}, not the model:}
+
+\ol{
+\li{\strong{Per-entity state machine.} Each owned RR variable carries an ownership state, transitioned on \em{use} events — the analysis analogue of TB transitioning a permission on \em{access} events.}
+\li{\strong{Propagation along a tree with reconciliation at joins.} TB propagates an access to a node's relatives; we propagate liveness backward through the expression tree and \strong{reconcile sibling control-flow branches} at each \code{\verb~|If~}/\code{\verb~|Match~} join (§6.1).}
+\li{\strong{Terminal ("settled") states must not be re-used.} TB makes a post-\code{\verb~|Disabled~} access UB; we make the corresponding situation \em{unrepresentable} — the analysis guarantees every owned var reaches a settled state exactly once per path, so the runtime is always well-defined.}
+}
+
+\p{Our lattice is far simpler than TB (no aliasing, no reborrow stack, no protectors, no interior-mutability variants):}
+
+\pre{\verb~|
+        bind / param-in
+              │
+              ▼
+           Owned ──── non-last use ──▶ dup (rc++), stay Owned
+            │   │
+       last │   │ goes dead
+      use   ▼   ▼ (no further use)
+        Consumed   Dropped          ── both terminal ("settled")
+            ▲
+   return = Consumed (moved to caller, never dropped)
+~}
+
+\p{The crucial difference: TB is a \strong{runtime semantics} (it \em{defines} UB, checked dynamically by Miri); ours is a \strong{static rewrite} that \em{inserts} the rc ops so no such UB can arise. There is no "foreign access" notion — we never alias, we transfer ownership. (A future borrowed-parameter optimization would add a read-only \code{\verb~|Borrowed~} state, the rough analogue of \code{\verb~|Frozen~} — no drop responsibility.)}
+}
+}
+
+\subtree[design-ownership-analysis-s8]{
+\title{8. Placement in the tree}
+
+\p{\code{\verb~|crates/reussir-core/src/full/ownership.rs~} — pure, no MLIR dependency (fits the \code{\verb~|reussir-core::full~} "no MLIR" rule). Entry points:}
+
+\ul{
+\li{\code{\verb~|ownership::analyze(&mir::Program) -> OwnershipTable~}}
+\li{\code{\verb~|ownership::analyze_function(&Function, &RecordTable) -> …~} (for unit tests)}
+}
+
+\p{Methods over free functions where it reads naturally.}
+}
+
+\subtree[design-ownership-analysis-s9]{
+\title{9. Testing (pure, no execution)}
+
+\p{The analysis is a pure \code{\verb~|&Program → OwnershipTable~}, so it is unit-tested without any MLIR or runtime. The framework has three pieces: a way to \strong{construct} MIR, a way to \strong{assert} on the result, and a generic \strong{safety-net} property.}
+
+\subtree[design-ownership-analysis-s9-1]{
+\title{9.1 Construction — an in-arena \code{\verb~|MirBuilder~}}
+
+\p{A test-support \code{\verb~|MirBuilder~} builds \code{\verb~|mir::Function~} / \code{\verb~|Program~} directly in an arena, sharing the production \code{\verb~|ExprId~}-stamping path so anchors match real builds. Fluent constructors mirror the MIR forms:}
+
+\pre{\verb~|
+let mut b = MirBuilder::new(&tcx);
+let x = b.param("x", rc_ty);                 // an RR parameter
+let y = b.local();
+let body = b.seq([
+    b.let_(y, b.call(foo, [b.var(x)])),      // let y = foo(x);
+    b.var(y),                                //   y            (returned)
+]);
+let f = b.function("f", [x], rc_ty, body);
+~}
+
+\p{Types are \strong{real interned \code{\verb~|Ty~}s} (\code{\verb~|mk_record(.., Shared)~} for an rc, \code{\verb~|i64~} for a scalar, \code{\verb~|mk_nullable~}, …) backed by a minimal record table, so \code{\verb~|is_rr~} — the predicate everything keys off — is exercised for real, not stubbed.}
+
+\p{\em{Why a builder over textual MIR:} it is precise, \strong{parser-independent} (analysis tests don't break on unrelated ser/de gaps), and each increment can target exactly the forms it adds. Textual-MIR-driven tests are layered on later for round-trip coverage once the parser covers every form — at which point the same cases can be expressed as \code{\verb~|.mir~} strings.}
+}
+
+\subtree[design-ownership-analysis-s9-2]{
+\title{9.2 Assertion — annotated rendering + structured probes}
+
+\p{An \strong{annotated pretty-printer} walks the body together with the \code{\verb~|OwnershipTable~}, weaving each emitted op into the tree:}
+
+\pre{\verb~|
+fn f(x: Rc) -> Rc {
+  let y = foo(x);     // x: last use → move
+  y                   //    returned → move
+}                     // (no drops: everything moved)
+~}
+
+\p{Tests compare this rendering against an inline expected snapshot — readable, and doubling as live opsem documentation. Pinpoint cases also use structured probes: \code{\verb~|table.before(id)~} / \code{\verb~|table.after(id)~} assert the exact \code{\verb~|Dup~}/\code{\verb~|Drop~} set at a given node.}
+}
+
+\subtree[design-ownership-analysis-s9-3]{
+\title{9.3 Corpus}
+
+\p{One constructed function per rule, each with its expected annotated body:}
+
+\ol{
+\li{one use → \code{\verb~|Drop~} after last use;}
+\li{two uses → one \code{\verb~|Dup~} before the first;}
+\li{\code{\verb~|if~} / \code{\verb~|match~} arm reconciliation (var live in one arm only);}
+\li{borrow-only \code{\verb~|Proj~} → parent still dropped, field dup'd;}
+\li{returned var → moved, \strong{no} drop;}
+\li{nested value-record transitively holding rc → treated RR;}
+\li{unused RR parameter → dropped at entry.}
+}
+}
+
+\subtree[design-ownership-analysis-s9-4]{
+\title{9.4 Property check — a generic safety net}
+
+\p{Beyond goldens, a \strong{balanced-rc checker} abstractly interprets the annotated tree: along every control path, a \code{\verb~|dup~} is \code{\verb~|+1~}, a consuming use or a \code{\verb~|drop~} settles the unit. It asserts that every owned RR variable reaches a settled state \strong{exactly once per path} — no double-settle, nothing left live at \code{\verb~|return~} except the moved result. This catches placement bugs the hand-written goldens miss, and is cheap to run over every corpus case.}
+
+\p{Execution / ASAN-LSAN gating arrives in \strong{pm/08}, when codegen consumes the table.}
+}
+}
+
+\subtree[design-ownership-analysis-s10]{
+\title{10. Incremental stack (bottom-up PRs)}
+
+\ol{
+\li{\strong{Anchors + foundation — landed (\code{\verb~|full::ownership~}).} \code{\verb~|ExprId~} on \code{\verb~|mir::Expr~} (+ build/mono stamping via a shared \code{\verb~|ExprIdGen~}, printer unaffected), \code{\verb~|is_rr~} + \code{\verb~|RecordTable~}, \code{\verb~|OwnershipTable~} / \code{\verb~|RcOp~}, the \strong{\code{\verb~|MirBuilder~} test harness + annotated renderer + balanced-rc checker} (§9), and the \strong{linear core} (\code{\verb~|Var~} / \code{\verb~|Let~} / \code{\verb~|Seq~} / \code{\verb~|Call~} / \code{\verb~|Ctor~} / \code{\verb~|Variant~} / \code{\verb~|NullableCall~}) with the §9.3 corpus. Deferred forms (\code{\verb~|If~}/\code{\verb~|Match~}/\code{\verb~|Proj~}/…) \code{\verb~|unimplemented!~} loudly rather than miscount.}
+\li{\strong{Control flow — \code{\verb~|If~} landed.} \code{\verb~|If~} branch reconciliation (settle one-sided ownership so both arms exit owning the same set), multi-use \code{\verb~|Dup~} (already in increment 1), and discarded-result drops via \code{\verb~|RcOp::DropValue(ExprId)~} for an unconsumed non-\code{\verb~|let~} \code{\verb~|Seq~} statement.}
+\li{\strong{Pattern matching — landed (with guards).} \code{\verb~|Match~} over \code{\verb~|Switch~} + \code{\verb~|Leaf~} + \code{\verb~|Guard~}, following Perceus/Koka \strong{borrow-dup}: the scrutinee is borrowed; each leaf \code{\verb~|dup~}s the used RR fields it extracts, drops the consumed scrutinee early (or keeps it if live after), moves a whole-scrutinee binding, and reconciles dead-after outer vars N-way across the switch arms. Reuse specialization (in-place, uniqueness-guarded) is the backend's job, exactly as Koka separates Perceus from reuse analysis. \strong{Guards} keep the scrutinee live across the re-testable \code{\verb~|failure~} path (its drop stays in each terminal leaf, not hoisted); bindings are borrow-extracted at the guard, then settled per branch (consumed in the branch that uses them, dropped in the one that does not). \em{Note:} binding-type resolution via an enriched \code{\verb~|RecordTable~} proved \strong{unnecessary} here — an unused binding needs no op (the scrutinee drop frees it), and a used binding's type is on its \code{\verb~|Var~} node. \strong{Built-in integers} are the exception to borrow-dup: a switch on a \code{\verb~|Nat~} or \code{\verb~|Int~} is one \code{\verb~|rcgmp.match~}, which consumes the integer and gives its arms owned values (a range arm's distance from its bound, the integer in a \code{\verb~|default~} arm, a constant in a \code{\verb~|case~} arm), from which every occurrence derived from the integer is computed. Bindings of those occurrences are moves; a root switch takes a dying scrutinee (\code{\verb~|OwnershipTable::moves_scrutinee~}), otherwise code generation retains the switched value for the match. Telling these switches apart needs the occurrence types, so \code{\verb~|RecordTable~} also keeps each enum's variant fields.}
+\li{\strong{Containers — landed.} \code{\verb~|Proj~} borrow-dup (the extracted field is inc'd while the parent keeps the original; nested projections are pure navigation; the dead base drops early at the projection), \code{\verb~|Assign~} (\code{\verb~|src~} moved into the field, \code{\verb~|dst~} borrowed and dropped if dead — no old-field dec, the link is freed with its parent/region), \code{\verb~|Nullable~} payloads, \code{\verb~|Variant~}, transitive value-records.}
+\li{\strong{Closures & regions — landed.} Closure capture consumption (\code{\verb~|dup~} a capture still live after; the body is analyzed as its own owned scope — captures + params owned on entry, unused ones dropped), \code{\verb~|ClosureCall~} (target + args consumed left-to-right), and \code{\verb~|RegionRun~} (rc-transparent: the body's result is moved straight through; region lifetime is a separate axis).}
+\li{\strong{Drop-specialization} (optional, reuse-targeted) — still future backend work.}
+}
+
+\p{\strong{Every MIR form is now handled — no \code{\verb~|unimplemented!~} remains; the analysis is total over the Full MIR.}}
+
+\p{Then \strong{pm/08:} codegen consumes \code{\verb~|OwnershipTable~} → emits \code{\verb~|rc.inc~} / \code{\verb~|rc.dec~} / \code{\verb~|ref.drop~}, gated by ASAN/LSAN execution tests.}
+}
+
+\subtree[design-ownership-analysis-decisions]{
+\title{Decisions}
+
+\ul{
+\li{\strong{Anchor:} add \code{\verb~|ExprId~} to \code{\verb~|mir::Expr~}, stamped at the build/mono allocation choke point via a shared \code{\verb~|ExprIdGen~} (§4). \em{Locked, landed.}}
+\li{\strong{Owned-only convention} to start (no borrowed-parameter optimization); the simplest correct base, refined later. \em{Resolved.}}
+\li{\strong{RR set:} \code{\verb~|Shared~} records and closures are always rc; \code{\verb~|Value~} records are rc iff transitively so; a \code{\verb~|Regional~} record is rc iff its flexivity is \code{\verb~|Rigid~} (frozen out of its region); \code{\verb~|Nullable~} follows its inner. Management comes from the \code{\verb~|RecordTable~} for \em{every} record; the \code{\verb~|Ty~}'s flexivity (regional coloring) refines only the regional case (§3). \em{Resolved.}}
+\li{\strong{Increment 1 = linear core + \code{\verb~|is_rr~} + harness.} \em{Resolved, landed.}}
+}
+}
+
+\subtree[design-ownership-analysis-open-questions]{
+\title{Open questions}
+
+\ol{
+\li{\p{\strong{\code{\verb~|RecordTable~} provenance for the real pipeline.} Increment 1's table is built by the test harness. When codegen consumes the analysis (pm/08), build it from \code{\verb~|mono~}'s \code{\verb~|records: &FxHashMap<DefId, Record>~} \verb~|(~which has \code{\verb~|default_cap~}}
+\ul{
+\li{fields\verb~|)~ — confirm that hand-off rather than enriching \code{\verb~|mir::Program~}.}
+}}
+\li{\strong{Anonymous-result drops.} A non-\code{\verb~|let~} \code{\verb~|Seq~} statement of RR type whose result is discarded has no \code{\verb~|VarId~} to \code{\verb~|Drop~}; the var-only \code{\verb~|RcOp~} can't name it. Lands with the control-flow increment (likely a \code{\verb~|DropValue(ExprId)~} op).}
+}
+}

@@ -1,0 +1,105 @@
+\title{Basic tensor operations}
+\taxon{Design}
+\date{2026-10-15}
+\author{schrodingerzy}
+\tag{design}
+\meta{created}{2026-10-15}
+\meta{updated}{2026-10-15}
+\meta{origin}{docs/design/tensor-operations.md}
+\import{base-macros}
+
+\p{These operations run inside \code{\verb~|#[kernel]~} functions. Tensor values stay in kernel SSA; allocation, transfers, and launch are separate APIs. The existing async single-operation body checker still permits its original slice and collective operations. These new operations do not silently expand that eligibility; unsupported async bodies receive the existing single-operation diagnostic. The operations follow \<html:a>[href]{\verb~|https://github.com/openxla/stablehlo/blob/b9029ac2228a12e176ea20e56f7d3dcb6bf8a019/docs/spec.md~}{the pinned StableHLO specification}.}
+
+\pre{\verb~|
+import core::intrinsic::tensor;
+
+#[kernel]
+pub fn affine(x: Tensor<[f32; 2, 3]>, weights: Tensor<[f32; 3, 4]>)
+    -> Tensor<[f32; 2, 4]> {
+    let bias: Tensor<[f32; 2, 3]> = tensor::fill(1.0);
+    tensor::dot(x + bias, weights)
+}
+~}
+
+\subtree[design-tensor-operations-initialization]{
+\title{Initialization}
+
+\table{
+\tr{\th{Call}\th{Meaning}}
+\tr{\td{\code{\verb~|fill<Result>(value)~}}\td{Broadcast a scalar or rank-zero Tensor to the static result shape.}}
+\tr{\td{\code{\verb~|iota<Result>(axis)~}}\td{Fill each element with its index along the literal axis.}}
+\tr{\td{\code{\verb~|dynamic_fill<Result>(value, shape)~}}\td{Broadcast using runtime dimensions.}}
+\tr{\td{\code{\verb~|dynamic_iota<Result>(shape, axis)~}}\td{Iota with runtime dimensions and a literal axis.}}
+}
+
+\p{\code{\verb~|Result~} can be omitted when a binding annotation, return type, or another use constrains it. The fill value's dtype is inferred from that result, including through intermediate bindings. Iota requires a numeric result and a literal \code{\verb~|i64~} axis in \code{\verb~|[0, rank)~}. Fill supports every existing Tensor element type, including bool. Rank-zero and zero-extent fills are valid; rank-zero iota has no valid axis, while zero extents on a positive-rank tensor are valid.}
+
+\p{A runtime shape is a rank-sized tuple of \code{\verb~|i64~} or \code{\verb~|Tensor<i64>~} dimensions; \code{\verb~|()~} is the rank-zero shape. Literal dimensions are checked for nonnegativity, signed-64-bit representability, and agreement with known result extents. Runtime dimensions have the same preconditions. The result rank is always known:}
+
+\pre{\verb~|
+#[kernel]
+pub fn rows(n: Tensor<i64>) -> Tensor<[f32; ?, 4]> {
+    tensor::dynamic_fill(2.0, (n, 4))
+}
+~}
+
+\p{Dynamic result types emit \code{\verb~|stablehlo.dynamic_broadcast_in_dim~} or \code{\verb~|stablehlo.dynamic_iota~}. Whether a backend executes a particular dynamic shape is a backend capability; the frontend does not silently replace dynamic types with static shapes. CPU execution tests cover dynamic constructors with known result extents, while verifier tests also cover genuinely dynamic result types.}
+}
+
+\subtree[design-tensor-operations-arithmetic-and-selection]{
+\title{Arithmetic and selection}
+
+\p{\code{\verb~|+~}, \code{\verb~|-~}, \code{\verb~|*~}, \code{\verb~|/~}, \code{\verb~|%~}, unary \code{\verb~|-~}, and comparisons lower directly to tensor operations. Free intrinsics \code{\verb~|add~}, \code{\verb~|sub~}, \code{\verb~|mul~}, \code{\verb~|div~}, \code{\verb~|rem~}, \code{\verb~|neg~}, \code{\verb~|abs~}, \code{\verb~|min~}, \code{\verb~|max~}, \code{\verb~|eq~}, \code{\verb~|ne~}, \code{\verb~|lt~}, \code{\verb~|le~}, \code{\verb~|gt~}, and \code{\verb~|ge~} provide the same operations.}
+
+\p{Binary operands have identical shapes and element types. There is no implicit broadcast, dtype promotion, or conversion. Numeric operations support the existing signed/unsigned 8/16/32/64-bit integers and floating formats (\code{\verb~|f16~}, \code{\verb~|bfloat16~}, \code{\verb~|f32~}, \code{\verb~|f64~}), with each backend's execution support still applying. The existing Tensor type excludes \code{\verb~|float8~}. StableHLO boolean add/multiply mean OR/AND; min/max and comparisons also accept bool. Subtract/divide/remainder/negate/abs require numeric elements. Integer division truncates toward zero. Floating operations, NaNs, and integer edge cases follow the corresponding StableHLO operation.}
+
+\p{Comparisons return a same-shape \code{\verb~|Tensor<bool>~}. \code{\verb~|select(predicate, yes, no)~} selects elementwise; the predicate is a scalar or same-shape boolean Tensor. Both values are evaluated. This differs from kernel \code{\verb~|if~}, which selects a region with a scalar predicate.}
+
+\pre{\verb~|
+#[kernel]
+pub fn positive(x: Tensor<[f32; 8]>) -> Tensor<[f32; 8]> {
+    let zero: Tensor<[f32; 8]> = tensor::fill(0.0);
+    tensor::select(x > zero, x, zero)
+}
+~}
+}
+
+\subtree[design-tensor-operations-dot-and-transpose]{
+\title{Dot and transpose}
+
+\p{\code{\verb~|dot(lhs, rhs)~} lowers to \code{\verb~|stablehlo.dot_general~}, with no batching dimensions, the last left dimension and first right dimension contracting, and default StableHLO precision. It covers all four vector/matrix combinations:}
+
+\table{
+\tr{\th{Left}\th{Right}\th{Result}}
+\tr{\td{\code{\verb~|[T; K]~}}\td{\code{\verb~|[T; K]~}}\td{\code{\verb~|Tensor<T>~}}}
+\tr{\td{\code{\verb~|[T; M, K]~}}\td{\code{\verb~|[T; K]~}}\td{\code{\verb~|Tensor<[T; M]>~}}}
+\tr{\td{\code{\verb~|[T; K]~}}\td{\code{\verb~|[T; K, N]~}}\td{\code{\verb~|Tensor<[T; N]>~}}}
+\tr{\td{\code{\verb~|[T; M, K]~}}\td{\code{\verb~|[T; K, N]~}}\td{\code{\verb~|Tensor<[T; M, N]>~}}}
+}
+
+\p{The input and output element types match and are numeric. Known contracting extents must agree; dynamic contracting extents must agree at execution. Empty contracting dimensions and zero output dimensions are allowed. Result shape is inferred from concrete operand types, with an explicit result type available for generic calls. Arbitrary batches, contraction axes, quantized/complex types, and precision algorithms are outside this basic API.}
+
+\p{\code{\verb~|transpose(matrix)~} swaps the two dimensions of a rank-two tensor and infers the result type. It supports every existing tensor dtype.}
+}
+
+\subtree[design-tensor-operations-ordinary-core-members-and-generic-shapes]{
+\title{Ordinary core members and generic shapes}
+
+\p{The core declaration supplies normal \code{\verb~|#[kernel]~} methods, such as \code{\verb~|x.add(y)~}, \code{\verb~|x.dot(y)~}, \code{\verb~|x.transpose()~}, \code{\verb~|x.lt(y)~}, and \code{\verb~|mask.select(x, y)~}. Their bodies call the free intrinsics. \code{\verb~|Tensor::iota()~} enumerates axis zero; use the free intrinsic to choose another axis. Constructors can infer their shape argument from context:}
+
+\pre{\verb~|
+#[kernel]
+pub fn member_example(x: Tensor<[f32; 2, 3]>) -> Tensor<[f32; 2, 3]> {
+    let value: f32 = 2.0;
+    let filled: Tensor<[f32; 2, 3]> = tensor::Tensor::fill(value);
+    let ramp: Tensor<[f32; 2, 3]> = tensor::Tensor::iota();
+    x.add(filled).mul(ramp)
+}
+~}
+
+\p{Ordinary generic signatures cannot infer a scalar dtype from a different shape-type parameter. Annotate scalar values passed to constructor members, and annotate dimensions of shape tuples passed to dynamic constructor members. Free intrinsics carry the stronger builtin relation and infer these literal types directly. Comparison member results may also need an annotation; source comparison operators and free comparison intrinsics infer their boolean shape.}
+
+\p{\code{\verb~|Tensor<T>~} accepts a complete scalar-or-shape argument: \code{\verb~|T = f32~} gives rank zero and \code{\verb~|T = [f32; 2, 3]~} gives rank two. Generic substitution reapplies this former, so ordinary \code{\verb~|impl<T> Tensor<T>~} methods work for every rank. \code{\verb~|Tensor<[T; 2, 3]>~} instead fixes the shape and varies only the element type. Concrete rank-zero tensors never unify with ranked tensors, and nested array elements remain invalid.}
+
+\p{The executable examples are \<html:a>[href]{\verb~|https://github.com/reussir-lang/reussir/blob/main/tests/integration/frontend/tensor_operations.rr~}{\code{\verb~|frontend/tensor_operations.rr~}}, \<html:a>[href]{\verb~|https://github.com/reussir-lang/reussir/blob/main/tests/integration/frontend/tensor_operations_core.rr~}{\code{\verb~|frontend/tensor_operations_core.rr~}}, and \<html:a>[href]{\verb~|https://github.com/reussir-lang/reussir/blob/main/tests/integration/runtime/tensor_operations.rr~}{\code{\verb~|runtime/tensor_operations.rr~}}. The last checks actual tensor buffers on CPU PJRT, including repeated execution with a non-donated input.}
+}

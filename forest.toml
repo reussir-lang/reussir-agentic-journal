@@ -1,0 +1,6 @@
+[forest]
+trees = ["trees"]
+assets = ["assets"]
+url = "https://reussir-lang.github.io/reussir-agentic-journal/"
+home = "index"
+lang = "en"

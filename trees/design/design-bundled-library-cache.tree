@@ -1,0 +1,53 @@
+\title{Bundled library compilation cache}
+\taxon{Design}
+\date{2026-10-27}
+\author{schrodingerzy}
+\tag{design}
+\meta{created}{2026-10-27}
+\meta{updated}{2026-10-28}
+\meta{origin}{docs/design/bundled-library-cache.md}
+\import{base-macros}
+
+\p{\code{\verb~|rene build~} shares the bundled \code{\verb~|core~} package's compiled interface and static archive across build directories through \<html:a>[href]{\verb~|https://github.com/reussir-lang/compcache~}{compcache}.}
+
+\p{The store uses \code{\verb~|Bypass~} and \code{\verb~|ManagedDirectory~}: artifacts live only in leased on-disk directories, with SQLite metadata and no memory cache or blob payloads. The cache lives in the platform cache directory's \code{\verb~|rene~} subdirectory (\code{\verb~|$XDG_CACHE_HOME/rene~} or \code{\verb!!|~/.cache/rene!!} on Linux, \code{\verb!!|~/Library/Caches/rene!!} on macOS, and Local AppData's \code{\verb~|rene~} on Windows). \code{\verb~|RENE_CACHE_DIR~} overrides that complete path; relative overrides resolve against the working directory. \code{\verb~|rene/config.ncl~} under the platform config root overrides the application's defaults (4 GiB pruning trigger, seven-day retention, pruning on writes). \code{\verb~|RENE_CONFIG_DIR~} overrides the complete config directory. Omitted settings retain their defaults; an absent file uses defaults.}
+
+\p{Each v0 recipe includes bundled and materialized source digests, the library manifest, compiler executable identity, Rust compiler version, target, static-library codegen flags, optional report selection, and upstream artifact digests. The flags include the project's optimization profile, sanitizers, CPU features, reuse ABI and layout settings. Project output paths, runtime bake locations and runtime source bundle identity are absent. Link-only settings do not change a library bake. A local path dependency called \code{\verb~|core~} builds normally.}
+
+\p{A cache miss compiles directly into compcache's managed directory. Declared output files and the directory are synced before publication. No staging copy, project copy, hard link or symbolic link is needed. compcache manages concurrent production, recovery and eviction; its synchronous producer runs on a blocking worker under rene's process admission bound.}
+
+\p{Each dependency's selected interface, archive and optional report are recorded as their actual cache paths. Compiler \code{\verb~|--extern~} arguments and linker inputs use those paths directly. Runtime and library artifact handles own \code{\verb~|Arc<RuntimeLease>~} guards. Planned commands clone their input guards into compiler invocations, including blocking cache producers, so input files remain protected through subprocess completion. The graph retains library handles between stages; runtime handles retain the runtime. On error the scheduler drains admitted work. Lease ownership needs no shared registry or mutex. A static-library cache entry may be pruned after the build returns, without affecting linked outputs. The next build reacquires a lease and rebuilds a missing entry as needed. Source bundles remain local to each project. The Rust runtime is globally shared as described below.}
+
+\p{Cache failures use typed \code{\verb~|thiserror~} variants and identify \code{\verb~|RENE_CACHE_DIR~} in their diagnostics. Producer errors retain their typed source chains, including compiler, I/O and decoding failures; display formatting happens at the CLI or terminal UI boundary. Failed compilation never publishes a partial library. CLI tests use isolated cache directories.}
+
+\subtree[design-bundled-library-cache-globally-shared-rust-runtime]{
+\title{Globally shared Rust runtime}
+
+\p{\code{\verb~|reussir-rt~} is built once per Rust toolchain, target, runtime source bundle, allocator backend and sanitizer/Rust flags. Its immutable Cargo output stays in compcache's managed directory; every project with that configuration consumes the same paths. Project optimization profiles do not repeat this fixed-release Rust runtime build. The core/std library recipes independently retain the project's optimization, reuse ABI, sanitizer and layout settings.}
+
+\p{The cache handle owns only the store. The \code{\verb~|runtime.json~} record inside a runtime entry uses relative artifact paths; project metadata only records the selected paths, never live lease ownership. Cargo's target and build directories are pinned inside the cache entry. A project-selected rustup toolchain is resolved before changing working directory, so the global cache does not change which Rust compiler builds its runtime.}
+
+\p{The lit suite shares \code{\verb~|RENE_CACHE_DIR~} across fixtures, so same-target/runtime settings reuse one Cargo bake. The native cache tests also use that shared root; isolated fake-toolchain CLI tests verify cold publication, failure recovery and pruning.}
+
+\p{Runtime and core/std entries share one compcache store, including its metadata, object directory and automatic size/age pruning policy. The \code{\verb~|rene-rust-runtime-v0~} and \code{\verb~|rene-bundled-library-v0~} namespaces distinguish their recipes. The store bypasses the memory cache and uses managed on-disk directories.}
+}
+
+\subtree[design-bundled-library-cache-bundled-std]{
+\title{Bundled std}
+
+\p{The std source ships inside rene and uses the same disk cache after its core dependency is ready. It remains opt-in: declare \code{\verb~|dependencies.std = { version = "^0.1" }~} in \code{\verb~|rene.ncl~} to select the shipped version. Omitting the dependency neither loads nor builds std. The normal version solver checks the constraint; an explicit \code{\verb~|path~} selects a local std checkout and bypasses the bundled cache. Transitive path dependencies can request bundled std in the same way. Packages outside the shipped bundles continue to require a local path.}
+
+\p{Only each library's \code{\verb~|rene.ncl~} and \code{\verb~|src/~} are embedded. Build directories and other checkout files never enter the bundle or change its cache identity.}
+}
+
+\subtree[design-bundled-library-cache-persistent-pjrt-kernel-compilation]{
+\title{Persistent PJRT kernel compilation}
+
+\p{The PJRT-enabled runtime uses compcache directly, with application name \code{\verb~|reussir~}. A synchronous miss compiles and serializes the executable into SQLite; a later process deserializes those bytes with its own PJRT client. A resident hit returns a client-owned \code{\verb~|Arc<Executable>~}. Executables retain their clients, so eviction or cache shutdown does not invalidate callers' handles. Serialization or cache-write failures retain a successfully compiled payload and report the cache failure. Actual compiler errors remain typed failures and are not cached.}
+
+\p{The executable's v1 recipe includes the verified original bytecode digest, argument shapes and constant values, compile options, donation permissions, mapping and explicit contracts, logical and allocated buffer sizes, physical alias safety, output count, plugin digest, platform version, serialized topology and \code{\verb~|XLA_FLAGS~}. Buffer addresses themselves never enter the key. Ownership and physical alias checks run at every launch before lookup. Shape refinement, donation selection and rewriting, and native compilation run only inside the coalesced cache miss. The executable record includes its input mapping and non-donatable argument indices, so resident and persistent hits skip the entire compilation pipeline. Refined sources have no cache or persistent record. A checksum or deserialization failure causes one eviction/retry. compcache coalesces executable requests with the same key while allowing different kernels to compile concurrently. Native destruction happens outside cache locks. The cache has no private executor or background I/O workers.}
+
+\p{Configuration follows compcache: \code{\verb~|reussir/config.ncl~} under the platform config root, and \code{\verb~|reussir~} under its cache root. \code{\verb~|REUSSIR_CONFIG_DIR~} and \code{\verb~|REUSSIR_CACHE_DIR~} override the complete directories. Memory weights, pruning, SQLite and retry settings use compcache's schema and defaults. The former \code{\verb~|REUSSIR_PJRT_CACHE_CONFIG~} TOML settings and foyer storage files are no longer used.}
+
+\p{Rene embeds the Cargo-pinned compcache sources beside \code{\verb~|reussir-rt~}, rewrites the runtime dependency to that local path, and adjusts its seeded lock entry. Standalone Cargo resolution prunes the workspace's superset lock while retaining its version/source pins; it does not need the original compcache checkout.}
+}

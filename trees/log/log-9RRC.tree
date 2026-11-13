@@ -1,0 +1,14 @@
+\title{\code{\verb~|rrc~} compiles position-independent code by default for executables and dynlibs}
+\taxon{Change}
+\date{2026-10-24}
+\author{queclr}
+\tag{changelog}
+\tag{compiler-runtime}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{758}
+\import{base-macros}
+
+\p{\code{\verb~|rrc --emit executable~} and \code{\verb~|--emit dynlib~} now compile position-independent code when no \code{\verb~|--relocation-mode~} is given, as \code{\verb~|rene~} already did. Their link step makes a position-independent executable or a shared object, but the code was static on ELF: a table of code addresses (a closure vtable, or a retcon table of a recursive drop) in \code{\verb~|.rodata~} gave the executable text relocations (\code{\verb~|DT_TEXTREL~}), and lld refused to link it. An explicit \code{\verb~|--relocation-mode~} is kept, and the other outputs keep the target's default.}
+
+\p{Landed in \pr{758}.}

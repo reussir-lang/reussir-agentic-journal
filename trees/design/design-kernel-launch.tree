@@ -1,0 +1,84 @@
+\title{Host kernel launches}
+\taxon{Design}
+\date{2026-10-15}
+\author{schrodingerzy}
+\tag{design}
+\meta{created}{2026-10-15}
+\meta{updated}{2026-10-15}
+\meta{origin}{docs/design/kernel-launch.md}
+\import{base-macros}
+
+\p{\code{\verb~|core::intrinsic::pjrt::launch<P>(kernel<T>, arguments...)~} runs a named \code{\verb~|#[kernel]~} function on device buffers. \code{\verb~|P~} is an optional compile-time configuration type; omitting it selects \code{\verb~|core::intrinsic::pjrt::DefaultPlacement~}. Kernel type arguments are independent of the launch configuration and may be inferred.}
+
+\pre{\verb~|
+#[placement(devices = "0", layout = "default")]
+#[launch(backend_optimization_level = "2", donation = "none")]
+pub struct [value] Config {}
+
+#[kernel]
+fn choose(x: Tensor<[f32; 4]>, enabled: bool) -> Tensor<[f32; 4]> {
+    if enabled { x } else { x }
+}
+
+pub fn run(x: DevArray<[f32; 4]>, enabled: DevArray<bool>)
+    -> DevArray<[f32; 4], Config> {
+    core::intrinsic::pjrt::launch<Config>(choose, x, enabled)
+}
+~}
+
+\p{The target is a direct kernel reference, including an imported or generic function. It is not a closure or a first-class function argument. Launch is a host operation; kernels call other kernels with ordinary call syntax.}
+
+\subtree[design-kernel-launch-buffer-abi-and-ownership]{
+\title{Buffer ABI and ownership}
+
+\p{A kernel must return exactly one \code{\verb~|Tensor~}. The result is a fresh owned \code{\verb~|DevArray~} descriptor with the same source element type and global shape, using configuration \code{\verb~|P~} for its output placement. Future, Token, scalar, unit, and product results are not launch results.}
+
+\p{A Tensor parameter takes a DevArray of the same element type and global shape. A numeric or bool scalar parameter takes a rank-zero DevArray of that scalar type. Tuples are flattened recursively in field order; unit contributes no buffer. Scalar values are not uploaded implicitly. Unsigned buffers retain unsigned device element types.}
+
+\p{Input configuration markers may differ from \code{\verb~|P~}. All input and output arrays must use the same ordered logical device list, while each keeps its own sharding, memory kind, and layout. Thus a default-placement upload can feed a custom configuration that selects the same devices. No implicit resharding or copy between device sets occurs.}
+
+\p{Launch borrows its arguments for synchronous execution. Variables remain live through the call and temporaries are released afterward. The existing ownership and uniqueness analysis may select donation when \code{\verb~|donation = "auto"~}; it never forces donation of a shared live buffer. \code{\verb~|donation = "none"~} disables donation variants for that call. Both modes return independently owned descriptors.}
+}
+
+\subtree[design-kernel-launch-configuration]{
+\title{Configuration}
+
+\p{Configuration uses the existing zero-field, non-generic \code{\verb~|[value]~} placement marker. \code{\verb~|#[placement]~} specifies ordered devices, sharding, optional memory kind, and optional layout. A separate \code{\verb~|#[launch]~} attribute supports:}
+
+\table{
+\tr{\th{Option}\th{Values}\th{Meaning}}
+\tr{\td{\code{\verb~|backend_optimization_level~}}\td{\code{\verb~|"0"~}, \code{\verb~|"1"~}, \code{\verb~|"2"~}, \code{\verb~|"3"~}}\td{Sets XLA's backend optimization level in serialized compile options. Omission preserves the backend default.}}
+\tr{\td{\code{\verb~|donation~}}\td{\code{\verb~|"auto"~}, \code{\verb~|"none"~}}\td{Allows the existing safe donation optimization, or opts out. Default: auto.}}
+\tr{\td{\code{\verb~|view~}}\td{\code{\verb~|"global"~}}\td{Kernel shapes describe logical global tensors. Default: global.}}
+}
+
+\p{Unknown, duplicate, malformed, and misplaced options are errors. Local view is explicitly rejected because its replica and local/global shape rules require a different source type mapping. Launch options do not change DevArray storage. The typed configuration survives HIR, MIR, and package-interface roundtrips; no runtime configuration object is allocated.}
+}
+
+\subtree[design-kernel-launch-ifrt-mapping-and-supported-boundary]{
+\title{IFRT mapping and supported boundary}
+
+\p{The implementation follows the pinned XLA revision \code{\verb~|fc840b37e26bd36c99f32e295324a1700dc12ecd~}, specifically \<html:a>[href]{\verb~|https://github.com/openxla/xla/blob/fc840b37e26bd36c99f32e295324a1700dc12ecd/xla/python/ifrt/ir/ifrt_ops.td~}{\code{\verb~|ifrt.Call~}} and its \<html:a>[href]{\verb~|https://github.com/openxla/xla/blob/fc840b37e26bd36c99f32e295324a1700dc12ecd/xla/python/ifrt/ir/transforms/utils.cc~}{default compile-option construction}.}
+
+\table{
+\tr{\th{IFRT feature}\th{Source launch behavior}}
+\tr{\td{Callee and tensor signature}\td{A private nested module contains the reachable kernel closure and a tensor-only \code{\verb~|main~} entry. Nongeneric imported kernel bodies are exported too.}}
+\tr{\td{Input/output arrays}\td{Exact source dtype/global shape, descriptor sharding, ordered devices, memory and layout are retained.}}
+\tr{\td{Multiple or zero outputs}\td{Supported by IFRT; not exposed by the source's exact-one-Tensor result rule.}}
+\tr{\td{Device assignment}\td{Derived from P's ordered devices; one replica and one SPMD partition per device.}}
+\tr{\td{Local view}\td{Supported by IFRT; rejected by this source mapping.}}
+\tr{\td{Control operands/result}\td{No host token syntax. Calls execute synchronously through the current runtime.}}
+\tr{\td{Donation hints and aliases}\td{Derived only by safe ownership analysis; explicit unchecked aliases or forced donation are not exposed.}}
+\tr{\td{Argument/result metadata}\td{Compiler-generated sharding annotations; arbitrary user dictionaries are not accepted.}}
+\tr{\td{Compile options}\td{Backend optimization is checked and serialized; parameter convention and assignment are compiler-derived. Raw external option overrides, tupled parameters, and portable executables are not exposed.}}
+\tr{\td{Cache identity}\td{Kernel bytecode and compile options participate in the existing PJRT cache identity; configuration is not erased before compilation.}}
+}
+
+\p{Kernel helpers are lowered as kernel SSA, never native host functions. Standard MLIR inlining and symbol elimination prepare the isolated compilation unit for PJRT, including helpers that pass Future values. Recursive kernel call graphs are rejected. The kernel context marker remains attached through final kernel lowering. An OpenXLA-disabled build reports an explicit launch diagnostic.}
+
+\p{The compiler optimization level controls optional target-independent StableHLO optimization and inferred buffer donation. \code{\verb~|none~} and \code{\verb~|tpde~} omit these optimizations; \code{\verb~|default~}, \code{\verb~|aggressive~}, and \code{\verb~|size~} enable them. Required kernel preparation and explicit ownership contracts are preserved at every level. The configuration marker’s \code{\verb~|backend_optimization_level~} independently selects XLA backend optimization.}
+
+\p{Partitioned dynamic result dimensions require a logical result-shape contract, which this syntax does not provide. They receive an early diagnostic: padded physical shard shapes cannot recover an uneven logical result extent. Static uneven results and unpartitioned dynamic results retain their existing runtime paths.}
+
+\p{\code{\verb~|launch~} is an ordinary identifier. The special form is selected by the scoped \code{\verb~|core::intrinsic::pjrt::launch~} declaration (or its module/function import alias), before its kernel-reference argument is elaborated as a value. A local value or ordinary function named \code{\verb~|launch~} follows normal call resolution. The core prototype is a declaration anchor; it does not expose launch as a first-class function.}
+}

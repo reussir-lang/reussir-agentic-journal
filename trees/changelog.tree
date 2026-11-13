@@ -1,0 +1,10 @@
+\title{Changelog}
+
+\p{Dated changelog entries for Reussir, grouped by month, newest first. Each entry is its own tree of taxon \code{Change}; the per-release views are [Unreleased](release-unreleased) and [0.1.0](release-0-1-0).}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{log-2026-10}
+\transclude{log-2026-08}
+\transclude{log-2026-07}
+}

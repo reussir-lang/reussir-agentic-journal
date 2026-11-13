@@ -1,0 +1,80 @@
+\title{Dynamic-extent arrays: the strided-header box}
+\taxon{Design}
+\date{2026-08-29}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\contributor{claude-fable-5-1}
+\tag{design}
+\meta{created}{2026-08-29}
+\meta{updated}{2026-10-15}
+\meta{origin}{docs/design/dynamic-extent-arrays.md}
+\import{base-macros}
+
+\p{Extends \code{\verb~|!reussir.array~} from statically shaped only (\pr{344} Phase A) to per-dimension dynamic extents (\code{\verb~|!reussir.array<? x f64>~}), keeping rank static, exactly as memref spells it. The motivation is ecosystem-shaped: the array view is already a memref, and once extents can be runtime values an rc-managed Reussir array is a legal operand for the entire memref/tensor-consuming MLIR universe — \code{\verb~|linalg~} on both forms, and the OpenMP/Async/Enzyme directions named in AGENTS.md all speak memref. The fixed-shape restriction, not the rc box, is what keeps Reussir arrays a niche citizen today. Growable buffers are explicitly \em{not} this feature: \code{\verb~|std::collections::cow::vec~} remains the growable story, and nothing here adds a resize operation.}
+
+\subtree[design-dynamic-extent-arrays-box-layout-the-header-is-the-memref-descriptor]{
+\title{Box layout: the header is the memref descriptor}
+
+\p{A dynamic array's rc box stores the full strided-memref encoding — offset, sizes, strides, static dims included — and derives only the two descriptor pointers (both are \code{\verb~|box + header~}):}
+
+\pre{\verb~|
+{ i32 count | pad to align(index) | index offset
+  | index size[0..r] | index stride[0..r] | pad to align(elem) | payload }
+~}
+
+\p{The header is exactly what \code{\verb~|memref.extract_strided_metadata~} returns, minus the base buffer. It is never a hand-computed byte table: the members \code{\verb~|{i32, index, index×r, index×r}~} go through \code{\verb~|deriveCompoundLayout~} against the module's \code{\verb~|dlti.dl_spec~}, so index width and padding follow the target — on a 32-bit target index is 4 bytes and the header has no padding at all. This is the same discipline that makes \code{\verb~|str~}'s \code{\verb~|{ptr, len}~} lowering take \code{\verb~|converter.getIndexType()~} and that \code{\verb~|reussir-convert-to-llvm~} exists to preserve (its type converter is built from the stamped \code{\verb~|llvm.data_layout~}, not upstream's frozen 64-bit default). The header prefix is static per rank, so \code{\verb~|RcBoxType~} keeps answering alignment queries; only the tail size becomes dynamic.}
+
+\p{Static arrays keep today's headerless box and identity-layout \code{\verb~|memref<NxT>~} view — no regression, and the two forms stay distinct types.}
+
+\p{Dynamic arrays currently support shared boxes only. Regional (\code{\verb~|flex~}/\code{\verb~|rigid~}) RC pointers and references, and regional dynamic-array box types, are rejected by the type verifiers: the regional state/next/vtable header has no strided metadata extension yet.}
+}
+
+\subtree[design-dynamic-extent-arrays-views-and-projection]{
+\title{Views and projection}
+
+\p{\code{\verb~|getArrayViewMemRefType~} for a dynamic array returns \code{\verb~|memref<S0x…xT, strided<[?,…], offset: ?>>~}: static dims may stay static in the shape, but the layout is always the dynamic \code{\verb~|StridedLayoutAttr~}. \code{\verb~|array.view~} lowering becomes a straight header copy — GEP to the payload for both descriptor pointers, then \code{\verb~|2r+1~} loads — replacing \code{\verb~|MemRefDescriptor::fromStaticShape~}. Uniform for every static/dynamic mix; no constants-vs-loads case split.}
+
+\p{\code{\verb~|array.project~} lowers in \code{\verb~|reussir-convert-to-std~} to a non-negative-index check, an unsigned check against the leading \code{\verb~|memref.dim~}, and a guarded rank-reducing \code{\verb~|memref.subview~}. Out-of-bounds indices panic. Subview inference retains known strides and the memory space; MLIR value-bounds analysis omits the guard when it proves \code{\verb~|0 <= index < extent~}, including induction variables in bounded loops. Otherwise the panic guard remains. The offset includes \code{\verb~|i * stride[0]~}. The final projection bridges a rank-zero subview with \code{\verb~|reussir.ref.from_memref~}. This applies equally to static arrays, dynamic arrays, and other strided memrefs. Before LLVM lowering, the pipeline runs \code{\verb~|expand-strided-metadata~} and \code{\verb~|lower-affine~} to expand the standard view operations.}
+
+\p{The strided layout also buys mutation-free layout ops: transpose, reverse, and leading-dim slice rewrite the header only, gated by the same unique-or-clone discipline as \code{\verb~|array.with_unique_view~} (the header is part of the CoW'd box). Stride-0 broadcast is excluded from owning boxes: aliased elements would break the drop traversal's exactly-once contract.}
+}
+
+\subtree[design-dynamic-extent-arrays-invariants]{
+\title{Invariants}
+
+\ul{
+\li{\strong{Canonical on construction.} Constructors and clones always produce offset 0 and row-major suffix-product strides. Non-canonical headers arise only from in-place restride of an existing allocation, which never changes the footprint — so \code{\verb~|token.alloc~} size is always \code{\verb~|header + ∏sizes × elemsize~}, computed on the canonical form. The touched-extent formula (\code{\verb~|offset + Σ(size_i − 1)·stride_i + 1~} elements) is for verifier/debug assertions only, never allocation.}
+\li{\strong{Clone compacts.} The \code{\verb~|with_unique_view~} clone branch reads dynamic extents from the source view and constructs a canonical \code{\verb~|array.create~} with those extents. Its initializer loads each logical source element through the strided view and acquires its ownership before yielding it. The same path handles static arrays. Sharing never entrenches a degenerate layout.}
+\li{\strong{Tokens.} \code{\verb~|rc.dec~} of a dynamic array produces \code{\verb~|token<align, ?>~}, the existing universal fallback donor; \code{\verb~|token.alloc~} gains an SSA size operand (the \code{\verb~|__reussir_allocate~} entry point already takes a runtime size — only the constant-gated \code{\verb~|_small~} fast path stays static-only). Boxes past \code{\verb~|kAllocatorBinModelMax~} are excluded from reuse pairing, implementing the \pr{344} integration note.}
+}
+}
+
+\subtree[design-dynamic-extent-arrays-what-has-to-change-audited]{
+\title{What has to change (audited)}
+
+\ul{
+\li{\code{\verb~|ArrayType::verify~} and the parser/printer: accept and print \code{\verb~|?~} (\code{\verb~|ShapedType::kDynamic~}); today any negative extent is rejected.}
+\li{\code{\verb~|ArrayType::getTypeSizeInBits~}: must fail loudly on a dynamic shape instead of multiplying the sentinel; audit every caller (\code{\verb~|TokenInstantiation::getTokenType~}, the \code{\verb~|ConvertToSTD~} clone branch's \code{\verb~|getTypeSize(rcBoxType).getFixedValue()~}, \code{\verb~|memberStorageType~}).}
+\li{\code{\verb~|RcBoxType::getTypeSizeInBits~}/\code{\verb~|getABIAlignment~}: the \code{\verb~|llvm_unreachable("must have a fixed size")~} paths route to the runtime size computation; alignment is already shape-independent.}
+\li{Type converter: nested \code{\verb~|LLVM::LLVMArrayType~} has no dynamic form, so converting a dynamic array as a concrete value fails. Only the dynamic box layout uses a header struct plus a trailing zero-length-array-style tail.}
+\li{\code{\verb~|emitArrayElementTraversal~} (drop/acquire): loop bounds from header loads; the ≤4 unroll threshold gates to static shapes; iteration walks the logical index space through strides (exactly-once by the no-aliasing invariant).}
+\li{Pipeline: insert \code{\verb~|expand-strided-metadata~} before \code{\verb~|reussir-convert-to-llvm~}. No memref-level pass runs today, and with strided layouts first-class, transform-anchor tiling can legitimately leave \code{\verb~|memref.subview~}/\code{\verb~|extract_strided_metadata~} in the IR.}
+\li{Frontend: \code{\verb~|TyKind::Array~} dims become per-dimension static/dynamic; \code{\verb~|eval_extent~} stops requiring literals (a non-literal extent makes the dim dynamic and the value an argument of \code{\verb~|splat~}/\code{\verb~|tabulate~}); add an \code{\verb~|array::dim~} intrinsic; lengths stay \code{\verb~|u64~} until \code{\verb~|usize~} lands.}
+}
+}
+
+\subtree[design-dynamic-extent-arrays-status]{
+\title{Status}
+
+\p{Dialect landed: \code{\verb~|!reussir.array<? x T>~} parses/verifies (\code{\verb~|?~} extents, \code{\verb~|ShapedType::kDynamic~}), size queries assert on dynamic shapes, and the type verifiers restrict dynamic arrays to shared boxes; the strided-header box (\code{\verb~|RcBoxType~} \code{\verb~|hasDynamicArrayPayload~} — \code{\verb~|{i32 count | index offset | sizes | strides | tail}~}, index-typed so the width follows the target); \code{\verb~|array.view~} builds the strided descriptor from header loads (box recovered from the payload ref by the static header offset); \code{\verb~|token.alloc~} takes an SSA byte size for \code{\verb~|token<align, ?>~}; \code{\verb~|array.create extents(…) body { … }~} creates an RC box with an optional single-block initializer region. The region takes one index per dimension and yields ownership of an element. Like closures, it lowers through \code{\verb~|array.instantiate~}, which initializes the canonical header. Fixed arrays use the same constructor. Initializer regions survive token reuse; SCCP, canonicalization, and loop-invariant code motion then run before expansion. An invariant yield with only invariant ownership acquisitions becomes \code{\verb~|array.fill_pattern~}; acquisitions are batched by the element count and skipped for empty arrays. Other bodies become loops. The fill operation is retained until basic lowering emits \code{\verb~|llvm.experimental.memset.pattern~} with a typed scalar or pointer pattern. An initializer yielding \code{\verb~|ub.poison~} still writes the payload: poison does not mean "leave storage untouched". Destination-passing kernels that reuse an input buffer can omit the \code{\verb~|array.create~} body to initialize only the header, then read each input element before overwriting its slot. Token instantiation and reuse still apply to this form. The caller must initialize the entire payload before exposing or releasing the result. Its \code{\verb~|TokenAcceptor::buildTokenSize~} implementation computes \code{\verb~|header + product(sizes) * elemsize~}; \code{\verb~|rc.dec~}/\code{\verb~|rc.reinterpret~} produce dynamic tokens freed unsized. \code{\verb~|array.project~} now lowers through checked strided subviews. Ownership acquisition and release use \code{\verb~|memref.dim~} for dynamic loop bounds; only small static shapes are unrolled. Empty dimensions skip all element ownership operations. The \code{\verb~|with_unique_view~} clone branch reads dynamic extents with \code{\verb~|memref.dim~} and uses the \code{\verb~|array.create~} sizing interface to allocate the clone. Its initializer copies logical elements through the source view, retaining managed elements and constructing a canonical layout. Executable e2e: \code{\verb~|dynamic_array_e2e.mlir~}, \code{\verb~|array_project_e2e.mlir~}, \code{\verb~|dynamic_array_clone_e2e.mlir~}, \code{\verb~|dynamic_array_managed_e2e.mlir~}, and \code{\verb~|dynamic_array_create_rc_e2e.mlir~}. The frontend lowers dynamic arrays through this strided-header representation. Runtime extents precede the fill value or tabulation kernel in shape order. Splat, tabulate, get, set, fold, and dim use checked runtime dimensions; empty arrays are supported. Restriding operations remain deferred. Device transfers preserve these logical dimensions as described in [device array transfers](design-device-array-transfers).}
+}
+
+\subtree[design-dynamic-extent-arrays-deferred]{
+\title{Deferred}
+
+\ul{
+\li{Const-generic extents (the monomorphization half of \pr{344} Phase C) produce \em{static} arrays and stay orthogonal; do not couple.}
+\li{Borrowed subviews that outlive an expression re-raise the \code{\verb~|str~} lifescope split ([design-str](design-str)); owner-level ops ship first.}
+\li{A growable/resizable array is a different feature with a different contract (\code{\verb~|token.realloc~} resizes dead donors only, \pr{362}); out of scope here.}
+}
+}

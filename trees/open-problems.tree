@@ -1,0 +1,7 @@
+\title{Open problems}
+
+\p{Questions that are not settled yet. A problem tree states the question, what is known, and what would close it. When it is closed, set its status and link the decision or change that closed it instead of deleting it.}
+
+\query\datalog{
+ ?X -: {\rel/has-taxon ?X '{Problem}}
+}

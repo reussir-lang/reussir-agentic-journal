@@ -1,0 +1,12 @@
+\title{Interface loading registers a dependency's traits before its records}
+\taxon{Change}
+\date{2026-08-22}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{compiler-runtime}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\import{base-macros}
+
+\p{Interface loading registers a dependency's traits before its records, so a record binder bounding an interface-local trait (\code{\verb~|struct Holder<T : Digest>~}) no longer crashes every downstream compile of that dependency.}

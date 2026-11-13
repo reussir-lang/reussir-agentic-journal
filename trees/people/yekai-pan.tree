@@ -1,0 +1,27 @@
+\title{Yekai Pan}
+\taxon{Person}
+\meta{kind}{human}
+
+\p{Reussir contributor.}
+
+\subtree[yekai-pan-written]{
+\title{Written}
+
+\scope{
+\put\transclude/expanded{false}
+\query\datalog{
+ ?X -: {\rel/has-author ?X @{yekai-pan}}
+}
+}
+}
+
+\subtree[yekai-pan-contributed]{
+\title{Contributed to}
+
+\scope{
+\put\transclude/expanded{false}
+\query\datalog{
+ ?X -: {\rel/has-direct-contributor ?X @{yekai-pan}}
+}
+}
+}

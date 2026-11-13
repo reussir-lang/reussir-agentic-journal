@@ -1,0 +1,12 @@
+\title{\code{\verb~|std::hash~} implements \code{\verb~|Hash~} for the primitive scalars}
+\taxon{Change}
+\date{2026-08-22}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\import{base-macros}
+
+\p{\code{\verb~|std::hash~} implements \code{\verb~|Hash~} for the primitives (\code{\verb~|u8~}–\code{\verb~|u64~}, \code{\verb~|i8~}–\code{\verb~|i64~}, \code{\verb~|bool~}, \code{\verb~|char~}): each scalar hashes as its own typed write, so primitives feed hashers, \code{\verb~|write~} chains, and hash-container key positions directly.}

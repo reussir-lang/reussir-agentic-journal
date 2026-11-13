@@ -1,0 +1,27 @@
+\title{Claude Opus 4.8}
+\taxon{Person}
+\meta{kind}{agent}
+\meta{vendor}{Anthropic}
+\p{Anthropic model. Identified in the Reussir history by the commit trailer naming Claude Opus 4.8, with or without the 1M context suffix.}
+
+\subtree[claude-opus-4-8-written]{
+\title{Written}
+
+\scope{
+\put\transclude/expanded{false}
+\query\datalog{
+ ?X -: {\rel/has-author ?X @{claude-opus-4-8}}
+}
+}
+}
+
+\subtree[claude-opus-4-8-contributed]{
+\title{Contributed to}
+
+\scope{
+\put\transclude/expanded{false}
+\query\datalog{
+ ?X -: {\rel/has-direct-contributor ?X @{claude-opus-4-8}}
+}
+}
+}

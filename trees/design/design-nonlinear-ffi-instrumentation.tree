@@ -1,0 +1,65 @@
+\title{Non-linear FFI usage instrumentation}
+\taxon{Design}
+\date{2026-08-22}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\tag{design}
+\meta{created}{2026-08-22}
+\meta{updated}{2026-08-22}
+\meta{origin}{docs/design/nonlinear-ffi-instrumentation.md}
+\import{base-macros}
+
+\p{The \code{\verb~|reussir-instrument-nonlinear-ffi~} pass guards every FFI-import call that consumes an rc'd \code{\verb~|ffi_object~} or \code{\verb~|array~} argument with a reference-count check. A count other than one at the boundary calls the runtime entry point \code{\verb~|__reussir_report_nonlinear_usage(file, line, col)~}, which prints the call's source location on stderr.}
+
+\p{Instrumentation is off by default. It is diagnostic output and never changes program semantics: a shared value still crosses the boundary, the foreign side still copies on write, and the result is identical.}
+
+\subtree[design-nonlinear-ffi-instrumentation-why-the-count-matters-at-the-boundary]{
+\title{Why the count matters at the boundary}
+
+\p{The FFI boundary follows the owned calling convention: every call consumes its rc arguments ([design-polymorphic-ffi](design-polymorphic-ffi), "Ownership: the boundary consumes"). When the caller still needs the value afterwards, the Perceus analysis retains it (\code{\verb~|reussir.rc.inc~}) before the call, so the count the callee observes is greater than one. For copy-on-write foreign structures — \code{\verb~|reussir_rt::collections::vec::Vec~} and everything else built on the foreign \code{\verb~|Rc~} header — that is exactly the case where an "in-place" update silently clones the whole payload. The instrumentation makes that cliff observable at its source location.}
+}
+
+\subtree[design-nonlinear-ffi-instrumentation-entry-points]{
+\title{Entry points}
+
+\pre{\verb~|
+reussir-opt input.mlir --reussir-instrument-nonlinear-ffi
+rrc input.rr -o demo.o --instrument-nonlinear-ffi
+~}
+
+\p{\code{\verb~|rene~} profiles spell it positively:}
+
+\pre{\verb~|
+[profiles.dev]
+instrument_nonlinear_ffi = true
+~}
+}
+
+\subtree[design-nonlinear-ffi-instrumentation-what-the-pass-emits]{
+\title{What the pass emits}
+
+\p{FFI call sites are ordinary \code{\verb~|func.call~}s whose callee is the body-less native declaration a \code{\verb~|reussir.trampoline import~} names as its \code{\verb~|target~}. For each such call, and for each argument whose type is \code{\verb~|!reussir.rc~} of an \code{\verb~|ffi_object~} or \code{\verb~|array~} payload (region-managed capabilities are skipped — their boxes carry no ordinary count), the pass inserts before the call:}
+
+\pre{\verb~|
+%count  = reussir.rc.fetch (%arg : ...) : index
+%shared = arith.cmpi ne, %count, %c1
+%cold   = reussir.expect(%shared : i1, false) : i1
+scf.if %cold {
+  llvm.call @__reussir_report_nonlinear_usage(%file, %line, %col)
+}
+~}
+
+\p{The file name is a content-addressed (\code{\verb~|Blake3Symbol.h~}), NUL-terminated \code{\verb~|llvm.mlir.global~}; line and column come from the call's \code{\verb~|FileLineColLoc~} (resolved through fused/name/call-site locations, zero when absent). The report path is \code{\verb~|reussir.expect~}'ed cold.}
+}
+
+\subtree[design-nonlinear-ffi-instrumentation-pipeline-position]{
+\title{Pipeline position}
+
+\p{The pass runs after \code{\verb~|reussir-token-reuse~} and the \code{\verb~|rc-create-sink~}/ \code{\verb~|rc-create-fusion~} pair and before \code{\verb~|reussir-compile-polymorphic-ffi~} — after every pass that can change a reference count, so the observed count is the final one, and before \code{\verb~|scf~} is lowered away. Running it earlier would be wrong twice over: \code{\verb~|inc-dec-cancellation~} treats \code{\verb~|reussir.rc.is_unique~} as a barrier but not \code{\verb~|reussir.rc.fetch~}, so an early fetch could observe a count a cancelled pair later invalidates; and an early check would perturb the very optimizations whose residue it is meant to report.}
+}
+
+\subtree[design-nonlinear-ffi-instrumentation-runtime]{
+\title{Runtime}
+
+\p{\code{\verb~|__reussir_report_nonlinear_usage~} lives in \code{\verb~|reussir-rt~} (\code{\verb~|src/instrument.rs~}) and is registered in the JIT symbol table (\code{\verb~|src/symbols.rs~}). It never aborts; it writes one line per firing check to stderr.}
+}

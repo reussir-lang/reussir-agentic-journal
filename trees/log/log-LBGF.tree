@@ -1,0 +1,15 @@
+\title{\code{\verb~|rrc~}, the clang-style pipeline driver}
+\taxon{Change}
+\date{2026-07-30}
+\author{claude}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{compiler-runtime}
+\tag{v0.1.0}
+\meta{release}{0.1.0}
+\meta{pr}{486}
+\import{base-macros}
+
+\p{\code{\verb~|rrc~}, the clang-style pipeline driver over the stage chain \code{\verb~|.rr → hir → mir → mlir → LLVM IR → objects/executables~}, re-entrant at every dump; machine-target selection (\code{\verb~|--target-triple~}, \code{\verb~|--target-cpu~}, \code{\verb~|--target-features~}) including \code{\verb~|wasm32-wasip1[-threads]~}.}
+
+\p{Landed in \pr{486}.}

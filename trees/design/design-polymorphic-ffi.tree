@@ -1,0 +1,230 @@
+\title{Polymorphic FFI}
+\taxon{Design}
+\date{2026-07-22}
+\author{claude}
+\contributor{schrodingerzy}
+\contributor{claude-fable-5}
+\contributor{yekai-pan}
+\contributor{claude-opus-5-5}
+\contributor{queclr}
+\tag{design}
+\meta{created}{2026-07-22}
+\meta{updated}{2026-10-28}
+\meta{origin}{docs/design/polymorphic-ffi.md}
+\import{base-macros}
+
+\subtree[design-polymorphic-ffi-motivation]{
+\title{Motivation}
+
+\p{Reussir's escape hatch to the systems world is Rust. Rather than pinning a uniform boxed ABI (Lean4-style) on every foreign call, the compiler \em{monomorphizes the foreign side too}: for each ground instance of an FFI function it renders a small self-contained Rust source (a \strong{texture}), compiles it to LLVM bitcode with \code{\verb~|rustc~}, and links the bitcode into the final module. Cross-boundary calls are ordinary same-module calls after linking — LLVM inlines through them at \code{\verb~|-O~}.}
+
+\p{The MLIR layer for this predates the frontend surface: \code{\verb~|reussir.polyffi~} (texture → bitcode → link), \code{\verb~|reussir.ffi_object~} (an opaque foreign payload behind an \code{\verb~|rc~}), and \code{\verb~|reussir.trampoline~} (the platform-independent boundary). This design gives that machinery a source-level surface.}
+}
+
+\subtree[design-polymorphic-ffi-surface]{
+\title{Surface}
+
+\pre{\verb~|
+// Opaque Rust items shared by this file's wrappers: use declarations,
+// helper functions, ... Spliced ahead of every wrapper the file generates.
+extern "rust" [{
+    use reussir_rt::collections::vec::Vec as RVec;
+}];
+
+// An opaque FFI type: a field-less struct aliasing a Rust type.
+#[ffi(rust = "::reussir_rt::collections::vec::Vec")]
+pub struct Vec<T>;
+
+// An imported function: a Reussir signature with an inline Rust body.
+#[ffi(import)]
+pub fn push<T>(v: Vec<T>, x: T) -> Vec<T> [{ RVec::push(v, x) }];
+~}
+
+\ul{
+\li{\code{\verb~|extern "rust" [{ ... }];~} — a \strong{foreign prelude}, file-scoped. Only the \code{\verb~|rust~} ABI is supported.}
+\li{\code{\verb~|#[ffi(rust = "path")] struct Name<T...>;~} — an \strong{opaque record}. No fields, no constructors, no patterns, no projections; always \code{\verb~|[shared]~}. The \code{\verb~|path~} must be an absolute (\code{\verb~|::~}-rooted) path to a Rust type that is a \code{\verb~|#[repr(transparent)]~} wrapper over \code{\verb~|reussir_rt::rc::Rc~} (see the contract below).}
+\li{\code{\verb~|#[ffi(import)] fn f<T...>(...) -> R [{ body }];~} — an \strong{imported function}. The signature is elaborated and type-checked as ordinary Reussir; the body is opaque Rust, evaluated with the parameters in scope at their Rust spellings. \code{\verb~|[:T:]~} in the body substitutes the instance's Rust spelling of generic \code{\verb~|T~} (rarely needed — inference from the bound parameters usually suffices).}
+}
+}
+
+\subtree[design-polymorphic-ffi-ownership-the-boundary-consumes]{
+\title{Ownership: the boundary consumes}
+
+\p{The ownership system is untouched: \strong{every call consumes its arguments}, imported functions included. The generated wrapper receives each argument owning one reference count; ordinary Rust move semantics take over from there — dropping releases, \code{\verb~|.clone()~} acquires. Nothing borrow-shaped ever crosses the boundary (that would need borrow-aware analysis, out of scope); \code{\verb~|&self~} borrows appearing inside a wrapper body act on values the wrapper already owns and end before it returns. The Perceus analysis inserts the usual \code{\verb~|inc~} before a call when the caller still needs the value afterwards.}
+}
+
+\subtree[design-polymorphic-ffi-clone-drop-across-the-boundary]{
+\title{Clone/drop across the boundary}
+
+\p{Both directions reduce to reference counts:}
+
+\ul{
+\li{\strong{Reussir holding a Rust value} (\code{\verb~|Vec<T>~}): the value is \code{\verb~|!reussir.rc<!reussir.ffi_object<"name", @hook>>~}. \code{\verb~|rc.inc~} bumps the count inline — sound because the exposed Rust type is a transparent wrapper over \code{\verb~|reussir_rt::rc::Rc~}, whose \code{\verb~|u32~} count sits at offset 0, mirroring the compiler's box header. \code{\verb~|rc.dec~} lowers to a call of the per-instance drop hook \code{\verb~|<inst>_ffi_drop~}, a generated Rust function that takes the value and drops it.}
+\li{\strong{Rust holding a Reussir value} (\code{\verb~|Vec<List>~}): the element is rendered as \code{\verb~|reussir_rt::bridge::Bridge<Inner>~}. \code{\verb~|Inner~} is the generated \code{\verb~|#[repr(transparent)]~} one-pointer wrapper named by the instance's v0 symbol. It remains the pointer's owner: its \code{\verb~|Clone~}/\code{\verb~|Drop~} call compiler-emitted \code{\verb~|<inst>_ffi_acquire~} / \code{\verb~|<inst>_ffi_release~} functions, tiny Reussir functions containing a single \code{\verb~|rc.inc~} / \code{\verb~|rc.dec~} (so fused headers, atomicity, and drop dispatch are handled by the compiler's own lowering, uniformly for structs and enums). \code{\verb~|Bridge~} is another transparent layer; its \code{\verb~|Clone~} delegates to \code{\verb~|Inner~} and ordinary field destruction drops \code{\verb~|Inner~}. It stores no descriptor, callback, or additional pointer.}
+}
+}
+
+\subtree[design-polymorphic-ffi-comparison-bridges-for-foreign-containers]{
+\title{Comparison bridges for foreign containers}
+
+\p{Rust containers place standard-trait bounds on their elements. For example, \code{\verb~|std::collections::BTreeSet<T>~} requires Rust's \code{\verb~|Ord~}, while a shared Reussir record implements Reussir's \code{\verb~|core::cmp::Ord~}. The two traits are distinct across the language boundary. Emitting every standard-trait adapter directly on every generated pointer wrapper would duplicate the generic Rust-facing part of the bridge in each PolyFFI texture.}
+
+\p{The runtime therefore owns a transparent adapter and four local behavior traits:}
+
+\pre{\verb~|
+pub trait PartialEqBridge {
+    fn eq_bridge(&self, other: &Self) -> bool;
+}
+pub trait EqBridge: PartialEqBridge {}
+pub trait PartialOrdBridge: PartialEqBridge {
+    fn partial_cmp_bridge(&self, other: &Self) -> Option<std::cmp::Ordering>;
+}
+pub trait OrdBridge: EqBridge + PartialOrdBridge {
+    fn cmp_bridge(&self, other: &Self) -> std::cmp::Ordering;
+}
+
+#[repr(transparent)]
+pub struct Bridge<T>(T);
+
+impl<T: PartialEqBridge> PartialEq for Bridge<T> { /* delegate to T */ }
+impl<T: EqBridge> Eq for Bridge<T> {}
+impl<T: PartialOrdBridge> PartialOrd for Bridge<T> { /* delegate to T */ }
+impl<T: OrdBridge> Ord for Bridge<T> { /* delegate to T */ }
+~}
+
+\p{PolyFFI emits the Reussir-specific bridge-trait implementations on \code{\verb~|Inner~}, which is local to the generated texture; \code{\verb~|reussir-rt~} owns \code{\verb~|Bridge~} and the standard Rust implementations. This division satisfies Rust's coherence rules without a runtime trait object. \code{\verb~|Bridge<Inner>~} is still exactly one pointer. It does not use \code{\verb~|reussir_rt::rc::Rc<Marker>~}: that type owns a Rust \code{\verb~|RcBox~} and would run the wrong payload destruction for a compiler-owned Reussir record.}
+
+\subtree[design-polymorphic-ffi-uniform-rendering-and-bound-discovery]{
+\title{Uniform rendering and bound discovery}
+
+\p{A shared Reussir ground type is rendered uniformly as \code{\verb~|Bridge<Inner>~} at every position in a texture, whether or not a particular position supplied the comparison requirement. Thus an import such as}
+
+\pre{\verb~|
+fn insert<T: Ord>(set: BTreeSet<T>, value: T) -> BTreeSet<T>
+~}
+
+\p{has one consistent Rust shape:}
+
+\pre{\verb~|
+fn insert(
+    set: RuntimeBTreeSet<Bridge<KeyInner>>,
+    value: Bridge<KeyInner>,
+) -> RuntimeBTreeSet<Bridge<KeyInner>>
+~}
+
+\p{A binder's declared bounds are what a rendered argument must satisfy, and both kinds of binder count. When rendering an opaque FFI record, the compiler matches its formal generic parameters to the ground arguments and examines their declared bounds. An \code{\verb~|#[ffi(import)]~} signature's own generics are the other source: \code{\verb~|fn same<T: PartialEq>(lhs: T, rhs: T) -> bool~} promises equality that its Rust body then uses directly, with no container in sight. Comparison lang items are found through trait identity and supertrait implication, not by spelling. Requirements from repeated appearances of the same shared-record instance are unioned before its inner declaration is rendered. Primitive arguments keep their native Rust spelling and use Rust's built-in comparison implementations; they are never wrapped in \code{\verb~|Bridge~}.}
+
+\p{Discovery is therefore a property of the \em{serialized} program, not of one compilation: HIR dumps carry their binder bounds, and a resumed build rebuilds that table alongside the trait database before monomorphizing. A resume that dropped it would not render a weaker program — it would render Rust that no longer compiles.}
+
+\p{The comparison tower is normalized and only the necessary foreign entries are emitted:}
+
+\table{
+\tr{\th{Reussir requirement}\th{generated behavior on \code{\verb~|Inner~}}\th{foreign entries}}
+\tr{\td{\code{\verb~|PartialEq~}}\td{\code{\verb~|PartialEqBridge~}}\td{\code{\verb~|_ffi_eq~}}}
+\tr{\td{\code{\verb~|Eq~}}\td{\code{\verb~|PartialEqBridge~}, \code{\verb~|EqBridge~}}\td{\code{\verb~|_ffi_eq~}}}
+\tr{\td{\code{\verb~|PartialOrd~}}\td{\code{\verb~|PartialEqBridge~}, \code{\verb~|PartialOrdBridge~}}\td{\code{\verb~|_ffi_eq~}, \code{\verb~|_ffi_partial_cmp~}}}
+\tr{\td{\code{\verb~|Ord~}}\td{all four bridge traits}\td{\code{\verb~|_ffi_eq~}, \code{\verb~|_ffi_cmp~}}}
+}
+
+\p{For \code{\verb~|Ord~}, \code{\verb~|PartialOrdBridge::partial_cmp_bridge~} returns \code{\verb~|Some(cmp_bridge(...))~}, so there is no separate partial-order entry. \code{\verb~|EqBridge~} is marker-only, matching Reussir's \code{\verb~|Eq~}; equality is supplied by \code{\verb~|PartialEq~}. A missing ground Reussir implementation is diagnosed during monomorphization, before the generated Rust is handed to \code{\verb~|rustc~} — once per rejected entry, however many textures and container instances wanted it.}
+}
+
+\subtree[design-polymorphic-ffi-borrowed-comparison-entries]{
+\title{Borrowed comparison entries}
+
+\p{Rust's comparison methods borrow both operands, whereas Reussir's comparison methods consume shared values. Each generated entry therefore accepts two raw RC handles borrowed from \code{\verb~|Inner~}, performs exactly two compiler-side acquires (\code{\verb~|rc.inc~}, one per operand), and directly calls a synthesized semantic adapter. The adapter consumes those acquired values under the ordinary Reussir ownership rules and returns a scalar ABI code. The entry performs no matching release: the selected method and ownership lowering settle the two acquired references. There are no Rust-side clones, acquire callbacks, dictionaries, or allocations on this path, and optimized builds can inline through the linked texture.}
+
+\p{The scalar contracts are stable and independent of enum layout:}
+
+\ul{
+\li{\code{\verb~|_ffi_eq~} returns \code{\verb~|u8~} zero or one after calling the selected \code{\verb~|PartialEq::eq~} implementation;}
+\li{\code{\verb~|_ffi_cmp~} calls \code{\verb~|Ord::cmp~} and classifies \code{\verb~|Ordering~} by variant name as \code{\verb~|Less = -1~}, \code{\verb~|Equal = 0~}, \code{\verb~|Greater = 1~} in an \code{\verb~|i8~};}
+\li{\code{\verb~|_ffi_partial_cmp~} makes one foreign entry call and classifies through \code{\verb~|PartialEq::eq~}, then \code{\verb~|PartialOrd::lt~}, then \code{\verb~|PartialOrd::gt~} as needed. Its \code{\verb~|i8~} codes are \code{\verb~|Less = -1~}, \code{\verb~|Equal = 0~}, \code{\verb~|Greater = 1~}, and \code{\verb~|Incomparable = 2~}; Rust maps the final code to \code{\verb~|Option<Ordering>~}.}
+}
+
+\p{The semantic adapter is an ordinary monomorphic MIR function. Consequently its trait calls use the same selection, ownership, optimization, and diagnostics as source-level Reussir calls. The borrowed entry itself is small and direct: two increments, one adapter call, and one scalar return.}
+}
+
+\subtree[design-polymorphic-ffi-comparison-implementations-from-another-package]{
+\title{Comparison implementations from another package}
+
+\p{No comparison dictionary or global instance registry is added for PolyFFI. Suppose package A defines a public shared \code{\verb~|A::Key~} and implements the core comparison traits, while only package B instantiates \code{\verb~|BTreeSet<A::Key>~}. A's RRI already exports the relevant impl metadata and method prototypes or generic bodies. When B loads that interface, its ordinary trait database reconstructs those impls. Bridge synthesis in B performs normal ground trait selection, selects A's implementation, and enqueues the same method symbol an ordinary trait call would use.}
+
+\p{A ground implementation method resolves from A's linked archive; an exported generic body can be instantiated in B. \code{\verb~|rene~} supplies the transitive RRI and archive dependency cone, while a direct \code{\verb~|rrc~} invocation must pass the corresponding \code{\verb~|--extern~} interface and \code{\verb~|--link-lib~} archive. Bridge entry names derive from the ground record symbol and use coalescible linkage, so identical downstream bridge generation does not create a second instance mechanism.}
+}
+}
+
+\subtree[design-polymorphic-ffi-the-boundary-convention]{
+\title{The boundary convention}
+
+\p{Wrappers use the trampoline's platform-independent boundary — only integers and pointers cross, so \code{\verb~|rustc~}'s and the compiler's lowerings agree by construction on every target (no \code{\verb~|sret~}/\code{\verb~|byval~}, no C aggregate classification):}
+
+\ul{
+\li{\strong{Trivial} (fewer than four parameters, all integer-like — integers, \code{\verb~|bool~}, \code{\verb~|char~}, and rc pointers — and an integer-like or \code{\verb~|unit~} result): the wrapper has the native signature and the import trampoline forwards directly.}
+\li{\strong{Nontrivial}: parameters pack into a \code{\verb~|#[repr(C)]~} struct passed by pointer; a non-integer-like result returns through a leading out-pointer.}
+}
+
+\p{The frontend's classification (\code{\verb~|full/ffi.rs::classify_trivial~}) mirrors \code{\verb~|evaluateCABISignatureForC~} in \code{\verb~|lib/Conversion/BasicOpsLowering/CABISignatureConversion.cpp~}; the e2e tests pin both sides. Per instance, the compiler emits: the bodyless native declaration (what callers call), a \code{\verb~|reussir.trampoline import "C" @<sym>_ffi = @<sym>~} (whose lowering materializes the native definition, packing and calling the boundary symbol), and a \code{\verb~|reussir.polyffi~} texture defining \code{\verb~|@<sym>_ffi~} in Rust with \code{\verb~|#[linkage = "weak_odr"]~} (duplicate monomorphizations across units dedupe at link).}
+}
+
+\subtree[design-polymorphic-ffi-symbols]{
+\title{Symbols}
+
+\p{All names derive from v0 manglings by suffixing — injective, since no valid v0 mangling is a prefix of another:}
+
+\table{
+\tr{\th{symbol}\th{role}}
+\tr{\td{\code{\verb~|<fn instance>~}}\td{the native function (callers use this)}}
+\tr{\td{\code{\verb~|<fn instance>_ffi~}}\td{the Rust-side boundary wrapper}}
+\tr{\td{\code{\verb~|<record instance>_ffi_drop~}}\td{an opaque instance's drop hook}}
+\tr{\td{\code{\verb~|<record instance>_ffi_acquire~} / \code{\verb~|_ffi_release~}}\td{Reussir rc glue}}
+\tr{\td{\code{\verb~|<record instance>_ffi_eq~}}\td{borrowed equality entry (\code{\verb~|u8~})}}
+\tr{\td{\code{\verb~|<record instance>_ffi_partial_cmp~}}\td{borrowed partial classifier (\code{\verb~|i8~})}}
+\tr{\td{\code{\verb~|<record instance>_ffi_cmp~}}\td{borrowed total-order entry (\code{\verb~|i8~})}}
+}
+}
+
+\subtree[design-polymorphic-ffi-boundary-types-v1]{
+\title{Boundary types (v1)}
+
+\p{Signatures of imported functions may use: integers, \code{\verb~|f32~}/\code{\verb~|f64~}, \code{\verb~|bool~}, \code{\verb~|char~}, \code{\verb~|unit~} (return only), opaque \code{\verb~|#[ffi]~} types, \strong{shared Reussir records} (struct or enum), and \code{\verb~|Nat~}/\code{\verb~|Int~}. Everything else — value/regional records, \code{\verb~|Nullable~}, \code{\verb~|Arc~}, \code{\verb~|str~}, cells, arrays, closures — is rejected with a diagnostic at the ground instance (monomorphization), where the offending type is concrete.}
+
+\p{A parameter or result the signature declares as \code{\verb~|Nat~} or \code{\verb~|Int~} crosses as the raw rcgmp handle, \code{\verb~|*mut c_void~}. The wrapper owns the argument's reference like any other, and releases it after the body returns, so the body only borrows the handle and must not release it; to return a parameter, the body retains it first. A returned handle carries one reference, which the caller owns. The body calls the rcgmp runtime's C entry points (\code{\verb~|RCGMP/Runtime/Mpz.h~}) directly.}
+
+\p{Everywhere else \code{\verb~|Nat~} and \code{\verb~|Int~} are the owned handle \code{\verb~|reussir_rt::rcgmp::Mpz~}: as a type argument of an opaque type (\code{\verb~|Vec<Nat>~} is \code{\verb~|::reussir_rt::collections::vec::Vec<::reussir_rt::rcgmp::Mpz>~}), in \code{\verb~|[:T:]~}, and as a parameter or result declared as a generic instantiated at \code{\verb~|Nat~} or \code{\verb~|Int~}. \code{\verb~|Mpz~} is a \code{\verb~|#[repr(transparent)]~} pointer that owns one reference: \code{\verb~|Clone~} retains it (\code{\verb~|rcgmp_mpz_retain~}), \code{\verb~|Drop~} releases it (\code{\verb~|rcgmp_mpz_release~}), and \code{\verb~|PartialEq~}/\code{\verb~|Ord~} compare values (\code{\verb~|rcgmp_mpz_cmp~}), so a Rust container stores, clones, drops and orders the integers it holds. It is the generic's ordinary owned value: a body may move an argument into a container or return it, and the wrapper releases nothing after the body; a returned \code{\verb~|Mpz~} moves its reference to the caller, the C ABI still passing a pointer. \code{\verb~|into_raw~}, \code{\verb~|from_raw~} and \code{\verb~|as_ptr~} convert between the two spellings, e.g. \code{\verb~|Mpz::from_raw(rcgmp_mpz_retain(n, 0))~} stores a borrowed \code{\verb~|Nat~} parameter \code{\verb~|n~}. These methods are inlined into the code that uses them, so \code{\verb~|reussir-rt~} itself references no rcgmp symbol.}
+}
+
+\subtree[design-polymorphic-ffi-exposing-a-new-type]{
+\title{Exposing a new type}
+
+\p{Nothing in the compiler is Vec-specific. To expose another Rust type:}
+
+\ol{
+\li{wrap it in the runtime (or any crate on the \code{\verb~|rustc~} deps path) as a functional value: \code{\verb~|#[repr(transparent)] pub struct X(Rc<Inner>);~} with owning operations taking \code{\verb~|self~} and returning \code{\verb~|Self~} (\code{\verb~|reussir_rt::collections::vec::Vec~} is the model);}
+\li{declare it: \code{\verb~|#[ffi(rust = "::path::to::X")] pub struct X<...>;~}}
+\li{import its operations as \code{\verb~|#[ffi(import)]~} functions.}
+}
+
+\p{The \code{\verb~|Rc~}-wrapper contract is what makes the inline \code{\verb~|rc.inc~} sound and keeps clone free of FFI calls. (An acquire hook for non-\code{\verb~|Rc~} foreign types is a possible extension; it was deliberately left out of v1.)}
+}
+
+\subtree[design-polymorphic-ffi-pipeline-and-toolchain]{
+\title{Pipeline and toolchain}
+
+\p{The \code{\verb~|reussir-compile-polymorphic-ffi~} pass substitutes and compiles each texture with \code{\verb~|rustc~}. The driver flags \code{\verb~|--polyffi-rust-path~} (the \code{\verb~|rustc~} executable; a bare name resolves through \code{\verb~|PATH~}) and \code{\verb~|--polyffi-libdir~} (a package directory passed as \code{\verb~|-L~}, holding \code{\verb~|libreussir_rt~} and friends; repeatable, each directory becoming its own \code{\verb~|-L~}) pin the toolchain explicitly; they take precedence over the \code{\verb~|REUSSIR_RUSTC~} / \code{\verb~|REUSSIR_RUSTC_DEPS~} environment variables (the latter a list separated by the platform's environment path separator), which in turn beat the built-in probe list. The flags are the first step toward building against a host \code{\verb~|cargo~}/\code{\verb~|rustc~} toolchain instead of shipping a full Rust sysroot alongside the compiler. Each texture's bitcode is cached by \code{\verb~|reussir-polyffi-cache~}, using compcache's application defaults for \code{\verb~|rrc~}. The key identifies the Rust source, effective compiler options and selected compiler/library paths. Rene bakes dependencies with locked, offline builds; these inputs are fixed at the compilation call boundary.}
+
+\p{The cache stores raw bitcode only in its database, with memory bypass and no managed files. A hit skips rustc; concurrent misses for the same key share one compilation. Cache failures fall back to compilation, and failed compilations are not cached. Cache location and policy follow the standard \code{\verb~|rrc~} compcache configuration (see \code{\verb~|crates/reussir-polyffi-cache/README.md~}). \code{\verb~|translateToModule~} links the gathered bitcode into the final LLVM module. The JIT/REPL path does not gather polyffi modules yet and rejects programs containing them.}
+}
+
+\subtree[design-polymorphic-ffi-implementation-map]{
+\title{Implementation map}
+
+\ul{
+\li{surface/parsing: \code{\verb~|crates/reussir-syntax~} (\code{\verb~|ExternSourceStmt~}, foreign function bodies, field-less structs, \code{\verb~|key = "value"~} attribute args);}
+\li{validation and collection: \code{\verb~|crates/reussir-core/src/semi/ctxt.rs~} (\code{\verb~|ffi_attr~}, \code{\verb~|validate_ffi_record~}, \code{\verb~|validate_ffi_function~}, \code{\verb~|FfiPrelude~}/\code{\verb~|FfiImport~} tables, \code{\verb~|RecordFields::Opaque~});}
+\li{rendering: \code{\verb~|crates/reussir-core/src/full/ffi.rs~} (Rust spellings, comparison-bound discovery, \code{\verb~|Bridge<Inner>~} declarations, wrapper/drop textures), driven per instance from \code{\verb~|full/mono.rs~} (ground comparison selection and semantic adapters); MIR carries \code{\verb~|ffi_imports~}/\code{\verb~|ffi_textures~}/\code{\verb~|ffi_rc_glue~}/\code{\verb~|ffi_trait_glue~} and \code{\verb~|RecordLayout::Opaque~}, round-tripping through both textual IRs;}
+\li{runtime adapters: \code{\verb~|crates/reussir-rt/src/bridge.rs~} (the four behavior traits and transparent \code{\verb~|Bridge<T>~} standard-trait implementations) and \code{\verb~|crates/reussir-rt/src/rcgmp.rs~} (the owned \code{\verb~|Nat~}/\code{\verb~|Int~} handle \code{\verb~|Mpz~});}
+\li{codegen: \code{\verb~|crates/reussir-codegen/src/lower/{mod,ty,expr}.rs~} (rc'd \code{\verb~|ffi_object~} types, polyffi/trampoline emission, lifecycle glue, borrowed comparison entries, and hook functions);}
+\li{MLIR: \code{\verb~|reussir.trampoline~} import direction materializes the native marshaling body (\code{\verb~|lib/Conversion/BasicOpsLowering/BasicOpsLowering.cpp~}).}
+}
+}

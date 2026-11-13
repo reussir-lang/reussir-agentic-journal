@@ -1,0 +1,15 @@
+\title{The Reussir MLIR dialect}
+\taxon{Change}
+\date{2026-07-30}
+\author{claude}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{compiler-runtime}
+\tag{v0.1.0}
+\meta{release}{0.1.0}
+\meta{pr}{486}
+\import{base-macros}
+
+\p{The Reussir MLIR dialect: RC-managed objects as first-class IR, token-based reuse analysis across branches and regions, inc/dec cancellation, closure whole-program devirtualization, and LLVM lowering with debug info.}
+
+\p{Landed in \pr{486}.}

@@ -1,0 +1,131 @@
+\title{Token-reuse decision reports}
+\taxon{Design}
+\date{2026-08-16}
+\author{schrodingerzy}
+\tag{design}
+\meta{created}{2026-08-16}
+\meta{updated}{2026-08-16}
+\meta{origin}{docs/design/token-reuse-remarks.md}
+\import{base-macros}
+
+\p{The one-shot \code{\verb~|TokenReuse~} pass can report every fresh-allocation versus reuse decision as structured JSON. The report is intended for source-aware tools: a web playground can highlight the construction (the sink), jump to the dead object that donated its storage (the source), and explain why the pass did or did not reuse it.}
+
+\p{Reporting is off by default. It is diagnostic output and never changes the reuse result.}
+
+\subtree[design-token-reuse-remarks-entry-points]{
+\title{Entry points}
+
+\p{At the pass level, \code{\verb~|reussir-token-reuse{emit-remarks=1}~} emits standard MLIR \code{\verb~|Passed~} and \code{\verb~|Missed~} remarks in category \code{\verb~|TokenReuse~}, subcategory \code{\verb~|OneShot~}. This keeps the optimization available to MLIR tooling and custom remark streamers. For example:}
+
+\pre{\verb~|
+reussir-opt input.mlir \
+  --reussir-token-reuse=emit-remarks=1 \
+  --remarks-filter=TokenReuse \
+  --remark-format=emitRemark
+~}
+
+\p{\code{\verb~|rrc~} installs Reussir's JSON streamer and enables the pass with:}
+
+\pre{\verb~|
+rrc input.rr --emit mlir-llvm -o output.mlir \
+  --token-reuse-remarks reuse.json
+~}
+
+\p{The requested output must run the lowering pipeline: \code{\verb~|mlir-llvm~}, LLVM IR, assembly, an object, a library, or an executable. A plain \code{\verb~|mlir~} dump stops before token reuse and is rejected instead of producing an empty, misleading report. The report is target-independent; an explicit \code{\verb~|--target-triple~}, including a WebAssembly target, follows the same path.}
+
+\p{\code{\verb~|rene~} forwards the option to every artifact-producing compilation:}
+
+\pre{\verb~|
+rene build --token-reuse-remarks
+rene build --target wasm32-wasip1 --token-reuse-remarks
+~}
+
+\p{Each report is a cached sidecar beside its artifact. The name retains the artifact's complete file name so target kinds cannot collide:}
+
+\pre{\verb~|
+dev/demo.token-reuse.json
+dev/demo.wasm.token-reuse.json
+dev/deps/libutil.a.token-reuse.json
+~}
+
+\p{Dependency-interface (\code{\verb~|.rri~}) compilations do not run token reuse and do not receive a report. Deleting a sidecar invalidates only the product that owns it. \code{\verb~|rene inspect --commands --token-reuse-remarks~} exposes the exact paths without building.}
+}
+
+\subtree[design-token-reuse-remarks-schema-v1]{
+\title{Schema v1}
+
+\p{Every document has the schema tag \code{\verb~|reussir.token-reuse.v1~}:}
+
+\pre{\verb~|
+{
+  "schema": "reussir.token-reuse.v1",
+  "coordinates": {
+    "line_base": 1,
+    "column_base": 1,
+    "column_unit": "utf-8-byte",
+    "end": "exclusive"
+  },
+  "files": ["src/list.rr"],
+  "locations": [
+    {
+      "kind": "file",
+      "file": 0,
+      "start": {"line": 8, "column": 25},
+      "end": {"line": 11, "column": 10}
+    },
+    {
+      "kind": "file",
+      "file": 0,
+      "start": {"line": 10, "column": 13},
+      "end": {"line": 10, "column": 31}
+    }
+  ],
+  "decisions": [
+    {
+      "kind": "reuse",
+      "sink": 1,
+      "source": 0,
+      "strategy": "ensure",
+      "score": 2,
+      "available_tokens": 1,
+      "compatible_tokens": 1,
+      "instances": ["_RIC6updatelE", "_RIC6updatexE"],
+      "occurrences": 2
+    }
+  ]
+}
+~}
+
+\p{Coordinates match MLIR's source locations: lines and columns start at one, columns count UTF-8 bytes, and a range's end is exclusive. \code{\verb~|files~} is a shared string table; a file location's numeric \code{\verb~|file~} field indexes it.}
+
+\p{Locations form another shared table. A decision's \code{\verb~|source~} and \code{\verb~|sink~} are numeric indexes into that table. Supported nodes preserve MLIR's nested location structure:}
+
+\ul{
+\li{\code{\verb~|file~}: a source range and file-table index;}
+\li{\code{\verb~|name~}: a name and \code{\verb~|child~} location;}
+\li{\code{\verb~|callsite~}: \code{\verb~|callee~} and \code{\verb~|caller~} locations;}
+\li{\code{\verb~|fused~}: a \code{\verb~|locations~} array;}
+\li{\code{\verb~|unknown~};}
+\li{\code{\verb~|opaque~}: a lossless printed fallback for an unrecognized location kind.}
+}
+
+\p{For a reuse decision, \code{\verb~|source~} is the location of the token-producing dead object and \code{\verb~|sink~} is the accepting construction. \code{\verb~|strategy~} is \code{\verb~|ensure~} for an exact compatible token or \code{\verb~|realloc~} for a resizable donor. \code{\verb~|score~} is the selection heuristic's score.}
+
+\p{For an allocation decision, \code{\verb~|source~}, \code{\verb~|strategy~}, and \code{\verb~|score~} are absent. \code{\verb~|reason~} is either \code{\verb~|no-available-token~} or \code{\verb~|no-compatible-token~}. Both decision kinds record how many tokens were available and how many passed compatibility scoring, so a UI can distinguish an empty reuse set from rejected candidates.}
+}
+
+\subtree[design-token-reuse-remarks-deduplication-and-determinism]{
+\title{Deduplication and determinism}
+
+\p{Locations are structurally interned. A one-child \code{\verb~|FusedLoc~} that only carries per-instantiation debug metadata is normalized to its child, preventing generic monomorphizations from duplicating otherwise identical source ranges. Other nested location structure remains visible.}
+
+\p{Decisions with the same kind, source/sink, strategy or reason, score, and candidate counts are grouped. Their function symbols appear once each in the sorted \code{\verb~|instances~} array, while \code{\verb~|occurrences~} retains the total number of remarks. This is lossless enough for a frontend to expand the grouping if it wants per-instance annotations. Files, canonical locations, decisions, and instances are sorted before serialization, so MLIR's parallel function-pass scheduling and multiple codegen units do not perturb the JSON bytes.}
+}
+
+\subtree[design-token-reuse-remarks-cost-model]{
+\title{Cost model}
+
+\p{The pass dispatches once per function to separate reporting-enabled and reporting-disabled template instantiations. The disabled candidate loop has no reporting branch or compatibility counter. Remark construction, string conversion, location interning, locking, and JSON state do not run unless reporting is enabled.}
+
+\p{In the enabled streamer, closed state uses compact enums (\code{\verb~|DecisionKind~}, \code{\verb~|ReuseStrategy~}, \code{\verb~|AllocationReason~}, and \code{\verb~|LocationKind~}) and numeric location IDs. Strings are retained only for irreducible payloads—file paths, names, opaque locations, and instance symbols—and for canonical location keys needed by structural deduplication and deterministic ordering. A mutex protects the single context-wide report while MLIR runs function passes in parallel.}
+}

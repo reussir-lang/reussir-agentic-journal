@@ -1,0 +1,19 @@
+\title{Insights}
+
+\p{Short lessons that would help a later session avoid a dead end or reach a fix faster. A confirmed lesson has taxon \code{Insight}; one that was not verified has taxon \code{Hypothesis} until someone confirms it. Each names its source: a pull request, an issue, or a session tree.}
+
+\subtree[insights-confirmed]{
+\title{Confirmed}
+
+\query\datalog{
+ ?X -: {\rel/has-taxon ?X '{Insight}}
+}
+}
+
+\subtree[insights-hypotheses]{
+\title{Hypotheses}
+
+\query\datalog{
+ ?X -: {\rel/has-taxon ?X '{Hypothesis}}
+}
+}

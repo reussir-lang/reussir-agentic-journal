@@ -1,0 +1,15 @@
+\title{An ownership-aware functional surface language}
+\taxon{Change}
+\date{2026-07-30}
+\author{claude}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{v0.1.0}
+\meta{release}{0.1.0}
+\meta{pr}{486}
+\import{base-macros}
+
+\p{An ownership-aware functional surface language: records (\code{\verb~|struct~}/\code{\verb~|enum~}) with \code{\verb~|value~}/\code{\verb~|shared~}/\code{\verb~|regional~} capabilities, pattern matching with exhaustiveness checking, closures, generics with monomorphization, and modules with \code{\verb~|mod~}/\code{\verb~|import~}.}
+
+\p{Landed in \pr{486}.}

@@ -1,0 +1,20 @@
+\title{Forester 6.0 on stock OCaml, from its upstream flake}
+\taxon{Decision}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{journal}
+\tag{tooling}
+\meta{status}{accepted}
+\meta{created}{2026-11-13}
+\meta{completed}{2026-11-13}
+
+\p{\strong{Status:} accepted.}
+
+\p{\strong{Decision.} The flake of this repository takes Forester from the upstream flake at the 6.0 tag, which builds it with the stock OCaml compiler through opam-nix. Jujutsu comes from nixpkgs. Nothing is expected to be installed on the host.}
+
+\p{\strong{Why 6.0.} Forester 6.0 bundles its theme in the binary and renders HTML directly. Earlier versions needed the theme as a git submodule, which jujutsu does not manage, and rendered XML that browsers styled with XSLT.}
+
+\p{\strong{Why not OxCaml.} Building with OxCaml was preferred but is not practical yet. The reasons and what would change this are in [prob-C8WN](prob-C8WN).}
+
+\p{\strong{Consequences.} Forester is not packaged in nixpkgs, so the build depends on the upstream flake and compiles Forester from source on first use. The flake uses the glibc package of the upstream flake and not its default static package, for the reason given in [ins-T5HE](ins-T5HE). See also [accepted risks](accepted-risks).}

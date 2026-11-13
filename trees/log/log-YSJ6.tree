@@ -1,0 +1,15 @@
+\title{Polymorphic FFI against Rust}
+\taxon{Change}
+\date{2026-07-30}
+\author{claude}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{v0.1.0}
+\meta{release}{0.1.0}
+\meta{pr}{486}
+\import{base-macros}
+
+\p{Polymorphic FFI against Rust (\code{\verb~|#[ffi]~}, raw MLIR bodies), \code{\verb~|extern~} monomorphization, and cross-package interfaces (\code{\verb~|.rri~}).}
+
+\p{Landed in \pr{486}.}

@@ -1,0 +1,40 @@
+\title{Kernel functions and conditionals}
+\taxon{Design}
+\date{2026-10-14}
+\author{schrodingerzy}
+\tag{design}
+\meta{created}{2026-10-14}
+\meta{updated}{2026-10-14}
+\meta{origin}{docs/design/kernel-functions.md}
+\import{base-macros}
+
+\p{\code{\verb~|#[kernel]~} marks a function or method as executing in kernel context. Kernels can call kernels. Host code can call a kernel only when its concrete return type is \code{\verb~|Tensor~}; generic calls are checked again after specialization. A kernel function cannot become an ordinary closure or host trampoline. Trait declarations and implementations must agree on the annotation.}
+
+\p{Kernel signatures accept tensors, supported numeric and boolean scalars, unit, and nested tuples of kernel values. Private helpers may also use \code{\verb~|Token~} and \code{\verb~|Future~}; public PJRT entries must flatten to tensor inputs and outputs. Generic types are checked when instantiated. Host calls, allocation, records, and closures remain invalid in kernels.}
+
+\subtree[design-kernel-functions-ssa-representation]{
+\title{SSA representation}
+
+\p{Kernel lowering has its own environment, separate from host aggregate and reference-count lowering. A scalar becomes a rank-zero tensor, \code{\verb~|Tensor<T>~} keeps its ranked shape, a tuple recursively becomes an ordered list of SSA values, and unit contributes no values. Unsigned elements use unsigned MLIR integer types, preserving unsigned division, comparison, and shift semantics. Bindings, projections, calls, and returns use the same flattening rules. There is no heap allocation or legacy StableHLO tuple operation for a source tuple.}
+
+\p{The \code{\verb~|is_kernel~} flag survives HIR and MIR serialization, dependency interfaces, generic specialization, and the final lowering environment. Emitted kernel functions carry \code{\verb~|reussir.kernel_function~}. A native compilation attempt diagnoses an unlaunched kernel before host conversion. Host-to-kernel launching is not yet implemented; it cannot accidentally become an ordinary host call.}
+}
+
+\subtree[design-kernel-functions-conditionals]{
+\title{Conditionals}
+
+\p{A kernel \code{\verb~|if~} accepts a \code{\verb~|bool~} or a rank-zero \code{\verb~|Tensor<bool>~} predicate and emits \code{\verb~|stablehlo.if~}. Branches capture outer SSA values and return the same flattened result types. Results may contain tensors and tokens, including nested source tuples and unit. A \code{\verb~|Future~} cannot cross an \code{\verb~|if~} result boundary, matching the \<html:a>[href]{\verb~|https://openxla.org/stablehlo/spec#if~}{StableHLO if specification}.}
+
+\pre{\verb~|
+#[kernel]
+pub fn choose(c: bool, n: i64, x: Tensor<[f32; 2]>, y: Tensor<[f32; 2]>)
+    -> (Tensor<[f32; 2]>, i64) {
+    let selected = if c { x } else { y };
+    (selected, if n < 0 { -n } else { n })
+}
+~}
+
+\p{Numeric and boolean literals, arithmetic, comparisons, negation, and bitwise operations emit StableHLO operations on rank-zero tensors. Short-circuit boolean expressions retain their conditional evaluation. Ordinary host functions keep their existing scalar and \code{\verb~|scf.if~} lowering.}
+
+\p{Executable examples cover \<html:a>[href]{\verb~|https://github.com/reussir-lang/reussir/blob/main/tests/integration/frontend/kernel_if_lowering.rr~}{textual IR replay}, \<html:a>[href]{\verb~|https://github.com/reussir-lang/reussir/blob/main/tests/integration/frontend/kernel_if_import.rr~}{imported generic kernels}, and \<html:a>[href]{\verb~|https://github.com/reussir-lang/reussir/blob/main/tests/integration/runtime/kernel_if.rr~}{real CPU PJRT execution}. The PJRT test supplies a standalone entry name and invokes the existing runtime ABI explicitly; it does not introduce source launch syntax.}
+}

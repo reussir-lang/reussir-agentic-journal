@@ -1,0 +1,12 @@
+\title{\code{\verb~|std::string::String~}, the growable counterpart to \code{\verb~|str~}}
+\taxon{Change}
+\date{2026-08-23}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\import{base-macros}
+
+\p{\code{\verb~|std::string::String~}: the growable counterpart to \code{\verb~|str~}, wrapping the runtime's rc-boxed copy-on-write Rust \code{\verb~|String~} through the polymorphic FFI (the same raw-handle pattern as the \code{\verb~|cow~} collections). Initial surface: \code{\verb~|new~}, \code{\verb~|from_str~}, \code{\verb~|len~}, \code{\verb~|is_empty~}, \code{\verb~|push_char~}, \code{\verb~|push_str~}, \code{\verb~|eq_str~}, and \code{\verb~|PartialEq~}/\code{\verb~|Eq~}. The buffer is always UTF-8, so \code{\verb~|push_str~} must not be fed a \code{\verb~|str::slice~} that splits a multi-byte character.}

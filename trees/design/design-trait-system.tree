@@ -1,0 +1,387 @@
+\title{Trait System Design (reussir-core)}
+\taxon{Design}
+\date{2026-06-20}
+\author{claude-opus-4-8}
+\contributor{schrodingerzy}
+\contributor{claude-fable-5}
+\tag{design}
+\meta{status}{proposal / RFC}
+\meta{created}{2026-06-20}
+\meta{updated}{2026-08-03}
+\meta{origin}{crates/reussir-core/docs/trait-system.md}
+\import{base-macros}
+
+\p{Status: \strong{proposal / RFC}. This document proposes the type-class / trait subsystem for the Rust port of the core, replacing the inherited primitive design. It states the model, the algorithms, the IR, and a staged plan.}
+
+\subtree[design-trait-system-s1]{
+\title{1. What we inherited, and why it has to change}
+
+\p{The Haskell core never had a real type-class system. It had a \em{bound} system bolted onto type inference, with the class hierarchy hard-coded:}
+
+\ul{
+\li{A "class" is just a path: \code{\verb~|newtype Class = Class Path~}. It carries \strong{no methods, no associated items, no instances} — only a name.}
+\li{\p{The hierarchy is a \code{\verb~|ClassDAG~} built once at startup, in code, for primitives only (\code{\verb~|populatePrimitives~}):}
+\pre{\verb~|
+PtrLike
+Num
+├── Integral      (impl: i8…u64)
+└── FloatingPoint (impl: f16, f32, f64, bf16, f8)
+~}
+\p{There is no way to \em{declare} a class or \em{give an instance}. "Membership" is a hand-written table (\code{\verb~|addClassToType~}).}}
+\li{A bound is a flat list, \code{\verb~|type TypeBound = [Class]~}. Inference holes carry a bound; \code{\verb~|satisfyBounds~} checks a candidate type against it by walking the DAG (\code{\verb~|isSuperClass~}, heavy-light decomposition for fast ancestor queries).}
+\li{The surface language can \em{use} bounds (\code{\verb~|<T: Num + Integral>~} parses into \code{\verb~|[name, [paths]]~}) but cannot \em{declare} a trait or write an \code{\verb~|impl~}. The whole vocabulary is closed.}
+}
+
+\p{This is enough to type integer/float literals and reject \code{\verb~|"x" + 1~}, and nothing more. It cannot express \code{\verb~|Eq~}, \code{\verb~|Ord~}, \code{\verb~|Hash~}, \code{\verb~|Iterator~}, user abstractions, or anything with a method. The DAG is a special-purpose subtyping engine for a fixed lattice; it is not a trait system.}
+
+\p{Separately — and this is the key design constraint — the core already \strong{monomorphizes}. \code{\verb~|Semi/FlowAnalysis.hs~} implements the type-based flow analysis of \em{The Simple Essence of Monomorphization} (Lutze et al., OOPSLA 2025): a flow graph whose nodes are \code{\verb~|GenericID~}s and whose edges are}
+
+\ul{
+\li{\strong{concrete seed} — a concrete type instantiates a generic (\code{\verb~|addConcreteFlow~});}
+\li{\strong{direct edge} — \code{\verb~|T~} flows unchanged into another generic (\code{\verb~|addDirectLink~}), e.g. calling \code{\verb~|g<T>~} from \code{\verb~|f<T>~};}
+\li{\strong{ctor edge} — \code{\verb~|T~} flows \em{under a constructor} into another generic (\code{\verb~|addCtorLink~}), e.g. passing \code{\verb~|List<T>~} where \code{\verb~|U~} is expected.}
+}
+
+\p{\code{\verb~|solveGeneric~} propagates concrete seeds to a fixpoint. A cycle through a ctor edge is a \em{growing edge} — monomorphization would not terminate (polymorphic recursion), and it is rejected. Direct cycles are fine.}
+
+\p{That algorithm decides the whole shape of the trait system, because it means \strong{we resolve polymorphism away at compile time}. We are Rust, not Haskell.}
+}
+
+\subtree[design-trait-system-s2]{
+\title{2. The core decision: System F (dictionaries) vs Rust (monomorphization)}
+
+\p{Two coherent end-states:}
+
+\table{
+\tr{\th{}\th{System-F / GHC style}\th{Rust style}}
+\tr{\td{Polymorphism at runtime}\td{preserved; one copy of code}\td{erased; one copy per instantiation}}
+\tr{\td{Trait evidence}\td{runtime \strong{dictionary} passed as a value}\td{resolved at compile time; \strong{no value}}}
+\tr{\td{Dispatch}\td{dynamic (through the dictionary)}\td{static (direct call); \code{\verb~|dyn~} is opt-in}}
+\tr{\td{Separate compilation of generics}\td{yes}\td{no (needs the instantiation)}}
+\tr{\td{Cost}\td{boxing / indirection}\td{zero-cost, code bloat}}
+\tr{\td{Heterogeneous collections}\td{natural}\td{needs \code{\verb~|dyn Trait~} (vtables)}}
+}
+
+\p{Reussir already monomorphizes, targets MLIR/LLVM, and is built around regions, in-place reuse, and no GC. Carrying runtime dictionaries would fight every one of those goals, and we already pay the monomorphization cost for generics regardless of traits. \strong{Recommendation: the Rust model} — nominal, coherent, statically resolved at monomorphization time, zero runtime evidence.}
+
+\p{We keep one hedge: resolution produces an explicit \strong{\code{\verb~|Evidence~}} value (a proof tree of which impl was chosen). Today we \em{consume} it statically (inline / emit a direct call). The day we want \code{\verb~|dyn Trait~}, the same \code{\verb~|Evidence~} becomes a vtable — dynamic dispatch is then an additive feature, not a redesign.}
+}
+
+\subtree[design-trait-system-s3]{
+\title{3. Design principles}
+
+\ul{
+\li{\strong{D1 — Nominal & coherent.} A trait is a named declaration; an impl names its trait and self type. Global coherence: at most one impl per (trait, type), enforced by orphan + overlap rules. This makes resolution deterministic and is what lets monomorphization pick \em{the} method.}
+\li{\strong{D2 — Static dispatch by default.} No dictionaries. \code{\verb~|dyn Trait~} is a deferred, additive phase.}
+\li{\strong{D3 — Built-ins are not special.} \code{\verb~|Num~}, \code{\verb~|Integral~}, \code{\verb~|FloatingPoint~}, \code{\verb~|PtrLike~} become ordinary built-in trait declarations with built-in impls ("lang items"). The solver has \em{no} hard-coded hierarchy; the DAG disappears. Super-traits subsume what the DAG did (\code{\verb~|Integral: Num~}).}
+\li{\strong{D4 — Bounds desugar to obligations.} \code{\verb~|<T: Trait>~} and \code{\verb~|where~} clauses are sugar for predicates \code{\verb~|T: Trait~} that the solver must discharge.}
+\li{\strong{D5 — Flexivity is a bound.} A trait ranges over a value \em{type}; but a value's \code{\verb~|Flexivity~} (\code{\verb~|Irrelevant | Regional | Flex | Rigid~}) is itself expressible in bound position: \code{\verb~|<T: Flex>~}, \code{\verb~|where T: Regional~}. These are \em{built-in capability predicates}, not traits — the capability lattice is closed (no user impls, no orphan rule), and a capability bound is discharged by \strong{lattice subsumption} rather than by impl search. They share the obligation/fulfillment plumbing (§4, §5.3) with trait bounds, so receiver capability and region requirements are written and solved uniformly with the rest of the bound language. The capability remains carried on the type (\code{\verb~|Ty::Record { flex }~}); the bound constrains what may instantiate the parameter.}
+\li{\strong{D6 — Design for associated types, implement later.} The IR reserves room for associated items and type projection; the first solver cut omits them.}
+}
+}
+
+\subtree[design-trait-system-s4]{
+\title{4. The IR}
+
+\p{Sketch (illustrative Rust, in \code{\verb~|reussir-core~}):}
+
+\pre{\verb~|
+// ---- types (port of Semi/Type.hs) -------------------------------------
+pub enum Ty {
+    Record { path: Path, args: Vec<Ty>, flex: Flexivity },
+    Int(IntTy), Fp(FpTy), Bool, Str, Unit,
+    Closure(Vec<Ty>, Box<Ty>),
+    Nullable(Box<Ty>),
+    Generic(GenericId),   // rigid: a bound type parameter in scope
+    Hole(HoleId),         // unification variable
+    Bottom,               // error recovery
+}
+
+// ---- traits & impls ---------------------------------------------------
+pub struct TraitDef {
+    pub id: TraitId,
+    pub name: Path,
+    pub params: Vec<GenericId>,          // params[0] is the implicit `Self`
+    pub supertraits: Vec<TraitRef>,      // replaces the ClassDAG edges
+    pub methods: Vec<MethodSig>,
+    pub assoc_tys: Vec<AssocTyDef>,      // reserved; empty for now (D6)
+}
+
+pub struct ImplDef {
+    pub generics: Vec<GenericId>,        // impl<…>
+    pub trait_ref: TraitRef,             // Trait<Args> being implemented
+    pub self_ty: Ty,                     //   for Self
+    pub where_clauses: Vec<TraitRef>,    // obligations the impl assumes
+    pub methods: Vec<MethodImpl>,        // bodies (each a FnDef)
+}
+
+/// `Trait<args>`. By convention args[0] is the Self type.
+pub struct TraitRef { pub trait_id: TraitId, pub args: Vec<Ty> }
+
+/// A predicate the solver must discharge.
+pub enum Obligation {
+    Trait(TraitRef),        // `τ: Trait<…>` — discharged by impl search (§5.1)
+    Cap(Ty, Flexivity),    // `τ: Flex` etc. — discharged by lattice subsumption
+    // later: projection-equality `<T as Trait>::Assoc == U`, etc.
+}
+
+/// The flexivity lattice (built-in, closed). `Cap(τ, c)` holds when the
+/// flexivity of τ is at least `c` in this ordering.
+pub enum Flexivity { Irrelevant, Regional, Flex, Rigid }
+
+/// The proof that an obligation holds — consumed statically now, a vtable later.
+pub enum Evidence {
+    Impl { impl_id: ImplId, args: Vec<Ty>, sub: Vec<Evidence> }, // chose an impl
+    Param(usize),         // discharged by an in-scope assumption (T: Trait)
+    Super { of: Box<Evidence>, idx: usize },                     // supertrait
+}
+~}
+
+\p{The \strong{instance database} indexes impls for fast candidate lookup, keyed by \code{\verb~|(TraitId, head-constructor of Self)~} — e.g. \code{\verb~|(Ord, Record "List")~}. Blanket impls (\code{\verb~|impl<T> Tr for T~}) go in a per-trait fallback bucket.}
+}
+
+\subtree[design-trait-system-s5]{
+\title{5. The algorithms}
+
+\subtree[design-trait-system-s5-1]{
+\title{5.1 Trait resolution / instance selection — the heart of it}
+
+\p{\code{\verb~|select(ob: &TraitRef, env: &ParamEnv) -> Result<Evidence>~}:}
+
+\ol{
+\li{\p{\strong{Gather candidates} from three sources:}
+\ul{
+\li{\strong{assumptions} in \code{\verb~|env~} (the function's own \code{\verb~|T: Trait~} bounds) — these discharge obligations whose Self is an abstract \code{\verb~|Generic~}/\code{\verb~|Hole~};}
+\li{\strong{impls} from the database whose \code{\verb~|(trait, self-head)~} matches;}
+\li{\strong{super-traits} reachable from an assumption/impl already in hand.}
+}}
+\li{\strong{One-way match} the obligation's args against each candidate header (matching, not full unification: only the candidate's own variables may be assigned). On success an impl yields \em{sub-obligations} from its \code{\verb~|where_clauses~}, instantiated with the match substitution.}
+\li{\strong{Recurse} on sub-obligations; assemble an \code{\verb~|Evidence::Impl { sub }~}.}
+\li{\strong{Coherence ⇒ ≤1 viable candidate}, so the result is unique (no backtracking, no committed-choice ambiguity). If Self is still a hole and no assumption applies, \strong{suspend} the obligation (see 5.3).}
+\li{\strong{Termination.} Memoize by normalized \code{\verb~|TraitRef~}. Bound recursion depth (overflow error, like rustc's recursion limit). Crucially, in the \em{whole- program} phase this is also bounded by the flow analysis (5.5): an ever-growing instance chain is a growing edge.}
+}
+}
+
+\subtree[design-trait-system-s5-2]{
+\title{5.2 Coherence (checked once, when items are collected)}
+
+\ul{
+\li{\strong{Orphan rule.} An impl is admissible only if its trait \em{or} the head constructor of its self type is local to the current compilation unit. Prevents two crates from defining conflicting impls.}
+\li{\strong{Overlap rule.} For every pair of impls of the same trait, unify their heads (Self + args) treating impl generics as unifiable. If they unify, the impls overlap → error. (Specialization — allowing a strictly-more-specific impl to win — is deliberately deferred.)}
+}
+
+\p{This is the part that \em{replaces} \code{\verb~|populatePrimitives~} + the DAG: built-in impls go through the exact same coherence check as user impls.}
+}
+
+\subtree[design-trait-system-s5-3]{
+\title{5.3 Integration with inference (port of \code{\verb~|Tyck~} + \code{\verb~|Unification~})}
+
+\ul{
+\li{Holes are still a union-find (\code{\verb~|UnificationState~} → Rust \code{\verb~|UnionFind<HoleId>~}). A hole no longer carries \code{\verb~|[Class]~}; instead the inference context owns a \strong{fulfillment context}: a worklist of pending \code{\verb~|Obligation~}s, each pointing at the holes it mentions.}
+\li{\code{\verb~|unify~} is unchanged structurally (port of \code{\verb~|unifyForced~}). When it solves a hole, it wakes any pending obligation mentioning that hole and re-runs \code{\verb~|select~}. Progress-or-suspend, to a fixpoint — exactly rustc's fulfillment loop.}
+\li{A function \code{\verb~|fn f<T: Trait>(…)~} pushes \code{\verb~|T: Trait~} into the \code{\verb~|ParamEnv~} as a \strong{given} while checking its body; calls that need \code{\verb~|T: Trait~} discharge against that assumption (\code{\verb~|Evidence::Param~}).}
+\li{\strong{At the end of a function}, every obligation must be discharged. One whose Self is concrete must find an impl (else "trait bound not satisfied"). One whose Self is the function's own \code{\verb~|Generic~} must be \em{implied by the declared bounds} (else "the bound \code{\verb~|T: Trait~} is not declared on \code{\verb~|f~}") — this is how we re-derive a function's required \code{\verb~|where~} clause and check it.}
+}
+
+\p{This subsumes today's \code{\verb~|satisfyBounds~}/\code{\verb~|subsumeBound~}/\code{\verb~|meetBound~} trio: bound subsumption is just "discharge \code{\verb~|T: Super~} given \code{\verb~|T: Sub~}" via super-trait edges.}
+}
+
+\subtree[design-trait-system-s5-4]{
+\title{5.4 Method resolution}
+
+\p{For \code{\verb~|recv.m(args)~} (and \code{\verb~|Trait::m(...)~}):}
+
+\ol{
+\li{Find in-scope traits declaring a method \code{\verb~|m~}.}
+\li{For each, form the obligation \code{\verb~|typeof(recv): Trait<…>~} and the call's expected signature; keep the candidates whose receiver can satisfy.}
+\li{Coherence + the fulfillment loop pick one. The call node records "method \code{\verb~|m~} of this resolved trait obligation". After monomorphization (5.5) the obligation's \code{\verb~|Evidence~} is concrete, so the node lowers to a \strong{direct call} to that impl's method symbol.}
+}
+}
+
+\subtree[design-trait-system-s5-5]{
+\title{5.5 Monomorphization: a reachable-instantiation worklist}
+
+\p{We \strong{do not} port the inherited flow analysis. It keys its graph on individual \code{\verb~|GenericID~}s and computes, independently per variable, the set of concrete types that reach each parameter. With more than one parameter that loses the \em{correlation} between them. Given}
+
+\pre{\verb~|
+fn pair<A, B>(a: A, b: B) -> Pair<A, B> { … }
+…
+pair::<i32, bool>(1, true);
+pair::<f64, str >(1.0, "s");
+~}
+
+\p{the per-variable view yields \code{\verb~|A ∈ {i32, f64}~}, \code{\verb~|B ∈ {bool, str}~} — and to specialize you must take a \em{cartesian product}, 4 combinations, of which only 2 ever occur. The phantom copies are wasted code at best and \em{ill-typed} at worst (a \code{\verb~|where A: Convert<B>~} that holds only for the real pairs would spuriously fail). Per-variable reachability is a non-relational over-approximation; monomorphization needs the relational truth.}
+
+\p{\strong{The robust algorithm: an instantiation worklist over whole substitutions.} This is the standard, precise approach (MLton, rustc's mono-item collector, C++ template instantiation). Track \em{substitutions}, not variables.}
+
+\ul{
+\li{A \strong{mono request} is \code{\verb~|(Def, σ)~} where \code{\verb~|Def~} is a polymorphic definition (function, record, or impl-method) and \code{\verb~|σ~} is a \strong{ground} substitution mapping \em{all} of \code{\verb~|Def~}'s generics to concrete types. \code{\verb~|σ~} is a tuple, so it keeps the parameters correlated by construction.}
+\li{\strong{Roots.} Seed from everything that must exist regardless of generics: exported / entry functions, and \code{\verb~|extern~}/\code{\verb~|trampoline~} items whose type args are given concretely. Non-generic defs have \code{\verb~|σ = ∅~}.}
+\li{\strong{Step.} Pop \code{\verb~|(Def, σ)~} and apply \code{\verb~|σ~} to the body. Every call/ctor site in the substituted body now has \em{ground} type arguments (the site's args are built from \code{\verb~|Def~}'s generics, which \code{\verb~|σ~} has made concrete — this is exactly why inference must leave no site under-determined). For each site calling \code{\verb~|Callee~} with ground args \code{\verb~|ts~}, build \code{\verb~|σ' = (Callee.generics ↦ ts)~} and push \code{\verb~|(Callee, σ')~} if unseen.}
+\li{\strong{Memoize} seen \code{\verb~|(Def, σ)~} (normalize \code{\verb~|σ~}). This terminates direct recursion and de-duplicates the emitted specializations.}
+\li{\strong{Output.} The visited request set \em{is} the monomorphic program / "LangMono": emit one specialized copy per request, each call a direct symbol (existing v0 mangling). No cartesian product is ever formed — only tuples that arise.}
+}
+
+\p{\strong{Traits ride the same worklist.} When stepping \code{\verb~|(Def, σ)~}, a method call \code{\verb~|recv.m(args)~} has a ground receiver type \code{\verb~|τ = σ(…)~}. Resolve \code{\verb~|τ: Trait~} with \code{\verb~|select~} (§5.1); coherence makes the chosen \code{\verb~|ImplDef~} and its ground impl-substitution \code{\verb~|σ_impl~} unique. Push \code{\verb~|(impl-method, σ_impl)~}; resolve the impl's \code{\verb~|where~}-clause obligations recursively, each chosen impl-method becoming another request. Trait resolution is \em{just more edges in the same graph}.}
+
+\p{\strong{Termination / polymorphic recursion.} The request set is infinite \strong{iff} there is polymorphic recursion: a cycle \code{\verb~|Def → … → Def~} along which the type \em{strictly grows} (\code{\verb~|f<T>~} calls \code{\verb~|f<List<T>>~}). Detect it with a \strong{strict-subterm (homeomorphic-embedding) check}: walking a call chain, if we reach \code{\verb~|(Def, σ')~} where an ancestor \code{\verb~|(Def, σ)~} on the same chain has \code{\verb~|σ~} a proper subterm of \code{\verb~|σ'~}, the type is growing without bound — reject with a diagnostic naming the cycle. Keep a type-size cap as a coarse backstop. This is the inherited "growing edge" idea lifted from single variables to whole substitutions, and it is exactly the "up to polymorphic recursion" boundary that \em{The Simple Essence of Monomorphization} (Lutze et al., OOPSLA 2025) draws. We borrow that boundary, not its per-variable flow encoding.}
+}
+
+\subtree[design-trait-system-s5-6]{
+\title{5.6 Flexivity obligations}
+
+\blockquote{
+\p{\strong{Status (revised): deferred.} This section assumed a \em{total} capability lattice with a \code{\verb~|⊒~} subsumption. That is wrong: \code{\verb~|Flex~} (mutable, but cannot be materialized out of its region) and \code{\verb~|Rigid~} (immutable, but materializable) are \strong{incomparable} — different axes, not a chain. Because the subsumption semantics are unsettled, the capability-as-a-bound machinery (\code{\verb~|Obligation::Cap~} / \code{\verb~|Evidence::Cap~} / the \code{\verb~|satisfies~} lattice) has been \strong{removed} from the code for now; \code{\verb~|Flexivity~} is just the coloring stored on \code{\verb~|Ty::Record~}. The design below is retained as a sketch and will be reworked (likely as a partial order, or folded into coloring/region checking) before capability bounds return.}
+}
+
+\p{\code{\verb~|Obligation::Cap(τ, c)~} is discharged separately from impl search:}
+
+\ul{
+\li{If \code{\verb~|τ~} is concrete, read its capability off the type (\code{\verb~|Ty::Record { flex }~}, or the built-in capability of primitives) and check \code{\verb~|cap(τ) ⊒ c~} in the lattice (§4). Succeed or report "\code{\verb~|τ~} is not \code{\verb~|c~}".}
+\li{If \code{\verb~|τ~} is an in-scope \code{\verb~|Generic~} carrying its own capability bound \code{\verb~|c'~}, discharge by \strong{subsumption}: \code{\verb~|c' ⊒ c~}. (This is the capability analogue of super-trait subsumption — and is what the old \code{\verb~|subsumeBound~} did, restricted to the fixed lattice.)}
+\li{If \code{\verb~|τ~} is still a \code{\verb~|Hole~}, \strong{suspend} like any other obligation (§5.3) and retry when the hole is solved.}
+}
+
+\p{Because the lattice is closed and finite, there is no search, no coherence, and no termination concern — capability discharge is a constant-time lattice comparison riding the same fulfillment worklist as trait obligations.}
+}
+}
+
+\subtree[design-trait-system-s6]{
+\title{6. Code overview (module layout in \code{\verb~|reussir-core~})}
+
+\p{Everything for the Semi phase lives under \code{\verb~|semi::~}; \code{\verb~|full::*~} (the monomorphized, mangled representation) is its future sibling. As built:}
+
+\pre{\verb~|
+crates/reussir-core/src/
+  surface.rs          typed surface AST + direct CST lowering / aeson serde
+  semi/               the whole Semi phase
+    ty.rs             Ty, TyKind, TyCtxt (interned), IntTy, FpTy, Flexivity, ids
+    infer.rs          ena union-find holes, unify/occurs/zonk, lazy instantiation
+    traits.rs         TraitRef, Obligation, Evidence
+    traits/db.rs      instance database, select(), super-trait evidence chains
+    traits/def.rs     TraitDef, ImplDef, MethodSig, AssocTyDef
+    traits/builtins.rs  lang-item traits + impls (Num/Integral/FP/PtrLike/Sync)
+    hir.rs            Semi HIR: Expr/ExprKind, DecisionTree, Function
+    ctxt.rs           collected items + Elaborator state + scan/collect driver
+    ty_eval.rs        surface-type → Ty + the regional capability coloring
+    fulfill.rs        fulfillment context (deferred obligations, fixpoint discharge)
+    check.rs          bidirectional infer/check over all expression forms
+    pattern.rs        decision-tree pattern compilation
+~}
+
+\p{Future (not yet built):}
+
+\pre{\verb~|
+  full/               monomorphized, mangled representation
+    ty.rs             Full type (mangled Symbol, resolved capability, no generics)
+    collect.rs        instantiation worklist over whole substitutions (§5.5)
+    specialize.rs     emit monomorphic IR with statically-resolved calls
+~}
+
+\p{Still pending inside \code{\verb~|semi~}: coherence (orphan/overlap), generic-impl one-way matching, associated types, and surface \code{\verb~|trait~}/\code{\verb~|impl~} syntax.}
+
+\p{Haskell → Rust mapping:}
+
+\table{
+\tr{\th{Haskell}\th{Rust}}
+\tr{\td{\code{\verb~|Data/Semi/Type.hs~}}\td{\code{\verb~|ty/~}}}
+\tr{\td{\code{\verb~|Data/Class.hs~}, \code{\verb~|Semi/Context.hs::populatePrimitives~}, \code{\verb~|Class.hs~} (DAG/HLD)}\td{\strong{deleted}; replaced by \code{\verb~|traits/builtins.rs~} + super-traits}}
+\tr{\td{\code{\verb~|Data/Semi/Unification.hs~}, \code{\verb~|Semi/Unification.hs~}}\td{\code{\verb~|infer/unify.rs~} + \code{\verb~|infer/fulfill.rs~}}}
+\tr{\td{\code{\verb~|Semi/Tyck.hs~}}\td{\code{\verb~|infer/tyck.rs~}}}
+\tr{\td{\code{\verb~|Data/Generic.hs~}, \code{\verb~|Generic.hs~}, \code{\verb~|Semi/FlowAnalysis.hs~}}\td{\strong{not ported}; replaced by \code{\verb~|mono/collect.rs~} (§5.5 worklist)}}
+\tr{\td{(new)}\td{\code{\verb~|traits/{db,select,coherence}.rs~}, \code{\verb~|mono/specialize.rs~}}}
+}
+}
+
+\subtree[design-trait-system-s7]{
+\title{7. Surface syntax impact}
+
+\p{Today only \strong{use sites} parse: \code{\verb~|<T: A + B>~} lowers to \code{\verb~|[name, [paths]]~}. There is no \code{\verb~|trait~} or \code{\verb~|impl~} declaration anywhere in the grammar (Rust \em{or} Haskell). A user-facing trait system needs new surface constructs:}
+
+\pre{\verb~|
+trait Ord<Self>: Eq { fn cmp(self, other: Self) -> Ordering; }
+impl Ord for i32 { fn cmp(self, other: i32) -> Ordering { … } }
+impl<T: Ord> Ord for List<T> where … { … }
+~}
+
+\p{That is: grammar rules, CST kinds, and AST/JSON lowering in \code{\verb~|reussir-syntax~}. \strong{Decision: this is in the first cut} — user-declared traits from the start, not deferred.}
+
+\blockquote{
+\p{\strong{As built (surface layer):} \code{\verb~|trait~}, \code{\verb~|impl~}, and \code{\verb~|for~} are \em{contextual identifiers}, not lexer keywords — the language has no reserved words, so \code{\verb~|fn trait(trait: i64)~} stays legal and \code{\verb~|trait + 1~} is an expression over a variable named \code{\verb~|trait~}. Trait bodies carry method \em{signatures only} (default bodies deferred per Phase 3; the parser consumes an offending body losslessly and reports). Supertraits are bare \code{\verb~|+~}-separated paths; \code{\verb~|where~} is not parsed (deferred). \code{\verb~|impl Trait<args> for Type~} uses a greedy single-shot \code{\verb~|for~} rule (\code{\verb~|impl for { }~} is an inherent impl of a type named \code{\verb~|for~}); a primitive in either head position is rejected this cut. Typed views: \code{\verb~|surface::TraitDecl~} and \code{\verb~|ImplBlock::trait_ref~}.}
+
+\p{\strong{As built (dispatch):} dot calls resolve \em{method-first} — inherent method, then trait method, then field — with \code{\verb~|(e.f)(x)~} forcing the field; \code{\verb~|Trait::method(recv, …)~} is the path spelling and the disambiguator when two traits provide a method. A ground-headed receiver commits to the unique impl at check time (an ordinary call); only a bare-generic receiver defers, as the serializable \code{\verb~|ExprKind::TraitCall~} that monomorphization rewrites once \code{\verb~|Self~} grounds. Multi-parameter traits never dot-dispatch (their non-\code{\verb~|Self~} arguments have no instantiation source until trait-call turbofish lands).}
+}
+
+\p{Flexivity bounds reuse the existing bound position. The names \code{\verb~|Irrelevant~}, \code{\verb~|Regional~}, \code{\verb~|Flex~}, \code{\verb~|Rigid~} in a bound list are recognized as built-in capability predicates (§5.6) rather than trait references; everything else in bound position resolves to a \code{\verb~|TraitRef~}.}
+}
+
+\subtree[design-trait-system-s8]{
+\title{8. Staged plan}
+
+\blockquote{
+\p{\strong{As built:} Phases 0–2 landed (the 2026-08 trait stack), with the capability predicate \em{removed} rather than ported (see §9) and the builtin table declared through the \code{\verb~|builtin_traits!~} proc-macro DSL (\code{\verb~|reussir-trait-dsl~}). Phase 3 remains future work, plus two recorded cuts: default method bodies and \code{\verb~|where~} clauses (impl assumptions come from inline binder bounds).}
+}
+
+\ul{
+\li{\p{\strong{Phase 0 — Foundations, behavior-preserving.} Port \code{\verb~|Ty~} + subst. Stand up \code{\verb~|traits/~} with \code{\verb~|Obligation~} (\code{\verb~|Trait~} + \code{\verb~|Cap~}) / \code{\verb~|Evidence~} and a trivial solver. Re-express \code{\verb~|Num/Integral/FloatingPoint/PtrLike~} as built-in trait defs}
+\ul{
+\li{built-in impls in \code{\verb~|builtins.rs~}, and the \code{\verb~|Flexivity~} lattice as the \code{\verb~|Cap~} predicate. Delete the \code{\verb~|ClassDAG~}/HLD machinery. \strong{Net effect: identical type-checking behavior, zero hard-coded hierarchy.}}
+}}
+\li{\strong{Phase 1 — Resolution + user traits.} Implement \code{\verb~|select~} (candidate gather, one-way match, recursion, memo, overflow) + coherence (orphan/overlap) + capability discharge (§5.6). Add surface \code{\verb~|trait~}/\code{\verb~|impl~}/\code{\verb~|where~} to \code{\verb~|reussir-syntax~} (lexer, grammar, CST, AST/JSON); collect user traits/impls; method resolution; wire the fulfillment context into \code{\verb~|tyck~}.}
+\li{\strong{Phase 2 — Monomorphization.} Implement the instantiation worklist (§5.5) over whole substitutions; resolve trait obligations per request and push impl-method instantiations; strict-subterm growth check for polymorphic recursion; emit \code{\verb~|dyn~}-free LangMono.}
+\li{\strong{Phase 3 — Future.} Associated types & projection, default methods, blanket impls, \code{\verb~|dyn Trait~} (Evidence → vtable), specialization.}
+}
+}
+
+\subtree[design-trait-system-s9]{
+\title{9. Decisions}
+
+\ul{
+\li{\strong{Model — DECIDED: Rust, monomorphized static dispatch.} No runtime dictionaries; \code{\verb~|dyn Trait~} is a deferred, additive phase (Evidence → vtable).}
+\li{\strong{Dispatch — DECIDED: static-only} for the first cut (follows from the model).}
+\li{\strong{Capabilities — REVISED: capability-as-a-bound was removed.} The \code{\verb~|Cap~} predicate of §5.6 was taken out before the trait stack landed (its non-total-order semantics were not settled); \code{\verb~|Obligation~} has a single \code{\verb~|Trait~} variant today, and flexivity stays where it was. If it returns it is a second obligation kind through the same \code{\verb~|SelectCtxt::select~} entry point.}
+\li{\strong{Surface traits — DECIDED: in the first cut.} User-declared \code{\verb~|trait~}/\code{\verb~|impl~}/\code{\verb~|where~} from the start (Phase 1).}
+\li{\strong{F1 — Coherence model — DECIDED: global coherence.} Orphan rule at \em{package} granularity (provenance = the extern-defs map: the trait or the self type's head must be local), overlap by two-sided unification within \code{\verb~|(trait, self-head)~} buckets — both impls' generics unifiable, so crossing heads like \code{\verb~|Pair<T, i32>~} vs \code{\verb~|Pair<u8, U>~} conflict — and blanket impls rejected this cut. Selection reuses the same engine one-way (only the candidate impl's generics as variables), which is what entitles it to commit to the first match.}
+\li{\strong{F4 — Associated types (open).} Now or later. Proposal: later (Phase 3); the IR reserves room (\code{\verb~|assoc_tys~}).}
+}
+
+\subtree[design-trait-system-s9-1]{
+\title{9.1 As-built decision record (the 2026-08 stack)}
+
+\ul{
+\li{\strong{D-A} Traits are a third def namespace (\code{\verb~|DefKind::Trait~}); the \code{\verb~|TraitDb~} is keyed by \code{\verb~|DefId~} and the old name-table died (builtins resolve bare at the crate root, prelude-style, shadowable per module).}
+\li{\strong{D-B} Coherence as in F1 above; supertrait cycles are reported and severed; sealed builtins reject user impls.}
+\li{\strong{D-C} Ground receivers resolve to direct calls at check time; generic receivers become \code{\verb~|ExprKind::TraitCall~}, resolved per instance at monomorphization.}
+\li{\strong{D-D} Impl methods are ordinary functions at \code{\verb~|[impl-module‥, trait-path‥, head-name, method]~} — unique by coherence, never spelled at call sites.}
+\li{\strong{D-E} Dot dispatch is inherent-first, then trait (ambiguity is an error steering to the \code{\verb~|Trait::method~} path form), then field.}
+\li{\strong{D-F} Multi-parameter traits are declarable; dispatch on them is deferred (no instantiation source for non-\code{\verb~|Self~} args).}
+\li{\strong{D-G} Default bodies deferred; conformance is an exact positional match under the \code{\verb~|Self~}/binder substitution, including receiver form and regionality.}
+\li{\strong{D-H} \code{\verb~|where~} clauses deferred; \code{\verb~|ImplDef.where_clauses~} derive from the inline binder bounds.}
+\li{\strong{D-I} Builtins are sealed; \code{\verb~|Sync~} is structural (answered by the checker, impl-less by construction).}
+\li{\strong{D-J} The builtin table is a \code{\verb~|builtin_traits!~} declaration (\code{\verb~|reussir-trait-dsl~}), contract-identical to the hand-written registration it replaced.}
+\li{\strong{D-K} \code{\verb~|RRI_FORMAT~} stays 1: every serialized form is an additive grammar production (§10).}
+\li{\strong{D-L} Monomorphization resolves \code{\verb~|TraitCall~}s with an empty assumption environment; impl methods join the export closure (generic ones as shipped bodies whose instances dedup \code{\verb~|weak_odr~}); the instantiation-depth limit is a spanned diagnostic, not an assert.}
+\li{\strong{D-M} The REPL checkpoint covers the \code{\verb~|TraitDb~} (dense-id truncation of traits, impls, and the \code{\verb~|(trait, head)~} buckets), so a rejected batch retracts its trait items exactly.}
+}
+}
+}
+
+\subtree[design-trait-system-s10]{
+\title{10. Serialization}
+
+\p{Trait items and trait calls have textual HIR forms, additive under \code{\verb~|RRI_FORMAT = 1~} (old dumps parse unchanged):}
+
+\pre{\verb~|
+pub trait #a::Show<$5 (Self), $6 (A)> : #a::Super<$5> in 0 [s..e] {
+    regional? fn show <$7 (U): Num> Arc|flex? (tys…) -> ty [s..e];
+}
+impl<$8: Num> #a::Show::<#a::Box::<$8>> in 0 [s..e] { #a::a::Show::Box::show }
+trait#a::Show::<$5>#0(recv, args…)
+~}
+
+\ul{
+\li{The trait binder's first generic is \code{\verb~|Self~}; method parameters are positional with the receiver at \code{\verb~|[0]~}, an \code{\verb~|Arc~}/\code{\verb~|flex~} tag restoring the receiver form. An impl's trait reference carries its \strong{full} argument list (\code{\verb~|args[0]~} = the self type), and its body lists method definitions by qualified path in trait-method order — the functions themselves serialize as ordinary items. Impl \code{\verb~|where~} clauses are never printed; they re-derive from binder bounds.}
+\li{\strong{Export closure:} \code{\verb~|pub~} traits seed; a shipped body's \code{\verb~|TraitCall~} and a shipped binder's bound pull more; the set closes over supertraits. An impl ships iff its trait does. Generic impl methods ship as walked bodies (consumers instantiate them; \code{\verb~|_RI~} symbols dedup \code{\verb~|weak_odr~}), ground ones as prototypes resolved by the producer's artifact at link time. Sealed builtins never serialize — every session re-registers them from the compiler.}
+\li{\strong{Reload:} loading a dependency interface rebuilds its trait items into the consumer's session \code{\verb~|TraitDb~} (two passes, since a super-trait may appear later in the dump than its sub-trait), re-allocating binders in the consumer's generic table and running the coherence check against the already-registered impls; re-loading is idempotent. Pipeline re-entry of a plain dump uses the same reconstruction (\code{\verb~|Parsed::rebuild_traits~}), and the resumability canary has a trait twin: a printed-and-reparsed trait program monomorphizes to byte-identical MIR.}
+}
+}

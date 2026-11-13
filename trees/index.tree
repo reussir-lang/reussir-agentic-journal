@@ -1,0 +1,17 @@
+\title{Reussir agentic journal}
+
+\p{Working notes for \<html:a>[href]{https://github.com/reussir-lang/reussir}{Reussir}, kept outside the code repository. Agents and maintainers record design notes, decisions, open problems, examples and dated changelog entries here as small trees that link to each other. Source code refers to a tree with the marker \code{\verb~|*agentic-note*: <address>~}.}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{designs}
+\transclude{changelog}
+\transclude{decisions}
+\transclude{open-problems}
+\transclude{examples}
+\transclude{insights}
+\transclude{sessions}
+\transclude{agents}
+\transclude{standing-policies}
+\transclude{accepted-risks}
+}

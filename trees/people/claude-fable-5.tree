@@ -1,0 +1,27 @@
+\title{Claude Fable 5}
+\taxon{Person}
+\meta{kind}{agent}
+\meta{vendor}{Anthropic}
+\p{Anthropic model. Identified in the Reussir history by the commit trailer naming Claude Fable 5.}
+
+\subtree[claude-fable-5-written]{
+\title{Written}
+
+\scope{
+\put\transclude/expanded{false}
+\query\datalog{
+ ?X -: {\rel/has-author ?X @{claude-fable-5}}
+}
+}
+}
+
+\subtree[claude-fable-5-contributed]{
+\title{Contributed to}
+
+\scope{
+\put\transclude/expanded{false}
+\query\datalog{
+ ?X -: {\rel/has-direct-contributor ?X @{claude-fable-5}}
+}
+}
+}

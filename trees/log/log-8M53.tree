@@ -1,0 +1,15 @@
+\title{Counted arguments are passed borrowed where the caller keeps them}
+\taxon{Change}
+\date{2026-10-31}
+\author{claude-opus-5-5}
+\contributor{queclr}
+\tag{changelog}
+\tag{compiler-runtime}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{864}
+\import{base-macros}
+
+\p{Counted arguments are passed borrowed where the caller keeps them (\pr{762}), at every optimizing level. The new \code{\verb~|reussir-borrow-specialization~} pass switches such a call to a private clone of the callee that neither retains nor releases the argument, nor the values loaded through it, so a read-only traversal of retained data updates no counts. Calls at an argument's last use keep the owned callee, so their in-place reuse is unchanged. \code{\verb~|rrc --disable-borrow-analysis~} (and the matching \code{\verb~|disable_borrow_analysis~} profile knob in \code{\verb~|rene~}) turns it off; \code{\verb~|reussir-borrow-analysis-remark~} reports the decisions. Borrowed parameters carry the new \code{\verb~|#reussir.borrowed~} argument attribute, which PJRT donation and UCRA treat as not owned.}
+
+\p{Landed in \pr{864}.}

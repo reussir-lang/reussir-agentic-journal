@@ -1,0 +1,27 @@
+\title{QueClr}
+\taxon{Person}
+\meta{kind}{human}
+\meta{external}{https://github.com/QueClr}
+\p{Reussir contributor.}
+
+\subtree[queclr-written]{
+\title{Written}
+
+\scope{
+\put\transclude/expanded{false}
+\query\datalog{
+ ?X -: {\rel/has-author ?X @{queclr}}
+}
+}
+}
+
+\subtree[queclr-contributed]{
+\title{Contributed to}
+
+\scope{
+\put\transclude/expanded{false}
+\query\datalog{
+ ?X -: {\rel/has-direct-contributor ?X @{queclr}}
+}
+}
+}

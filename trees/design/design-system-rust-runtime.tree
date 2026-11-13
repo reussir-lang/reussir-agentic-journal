@@ -1,0 +1,181 @@
+\title{Shipping the Runtime as Source: Using System Rust/Cargo}
+\taxon{Design}
+\date{2026-07-25}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\tag{design}
+\meta{status}{draft / proposal}
+\meta{created}{2026-07-25}
+\meta{updated}{2026-10-28}
+\meta{origin}{docs/design/system-rust-runtime.md}
+\import{base-macros}
+
+\p{The current implementation stores runtime bakes in the global compcache store, shared across projects by toolchain, target, source bundle and runtime settings. Artifacts are linked in place under reader leases. See [bundled-library-cache.md](design-bundled-library-cache) for the implemented layout and cache key; references below to per-project runtime output describe the original implementation.}
+
+\p{The runtime source archive embedded in \code{\verb~|rene~} also contains generated Cargo vendor sources and a relative \code{\verb~|.cargo/config.toml~}. Packaging resolves the full standalone dependency graph, including optional PJRT and other-target packages, from the workspace lock and rejects changes to version, source or checksum pins. Runtime baking uses \code{\verb~|--locked --offline~}; no vendor tree is checked into Git. The Rust/C toolchains and PJRT's native LLVM/StableHLO libraries remain external prerequisites. Cargo sources alone do not provide those native dependencies.}
+
+\p{Status: draft / proposal}
+
+\subtree[design-system-rust-runtime-motivation]{
+\title{Motivation}
+
+\p{Reussir currently ships a private Rust "sysroot": the nightly-release workflow packages \code{\verb~|rustc~}, \code{\verb~|cargo~}, \code{\verb~|rustdoc~}, \code{\verb~|librustc_driver~}, the whole \code{\verb~|rustlib~} tree, the toolchain's \code{\verb~|libstd-*.so~}, plus a prebuilt \code{\verb~|libreussir_rt.so~} and the entire \code{\verb~|target/<profile>/deps~} directory of rlibs. The compiler then hunts for these at run time via relative-path heuristics (\code{\verb~|RUSTC_HINTS~} / \code{\verb~|RUSTC_DEPS_HINTS~} in \code{\verb~|lib/RustCompiler/RustCompiler.cpp~}).}
+
+\p{This is fragile and heavy:}
+
+\ul{
+\li{The rlib/\code{\verb~|deps~} directory is only usable by the \em{exact} rustc that produced it (rlib metadata and symbol hashes are version-locked), forcing us to ship a full pinned toolchain alongside every release.}
+\li{Emitted programs link \code{\verb~|libreussir_rt.so~} as a Rust \em{dylib}, which drags in a runtime dependency on the toolchain's \code{\verb~|libstd-*.so~} — another reason the toolchain must travel with the release.}
+\li{Relative-path discovery breaks whenever the binary layout changes.}
+}
+
+\p{Instead, we adopt the Koka model (Koka ships the \code{\verb~|kklib~} runtime as C source and compiles it with the user's system cmake/cc): \strong{ship \code{\verb~|reussir-rt~} as vendored Rust source and build it on demand with the user's system rust/cargo.} The compiler stops shipping any Rust toolchain bits.}
+}
+
+\subtree[design-system-rust-runtime-current-couplings-what-makes-this-nontrivial]{
+\title{Current couplings (what makes this nontrivial)}
+
+\p{Polymorphic FFI is the sensitive consumer. The \code{\verb~|CompilePolymorphicFFI~} pass monomorphizes Rust source templates and invokes \code{\verb~|rustc --crate-type cdylib --emit=llvm-bc -L <deps>~} at Reussir compile time, then embeds the bitcode in the module; \code{\verb~|gatherCompiledModules~} later \code{\verb~|parseBitcodeFile~}s and \code{\verb~|llvm::Linker~}-merges it into the final LLVM module. This creates three hard version couplings:}
+
+\ol{
+\li{\strong{rlib ↔ rustc}: \code{\verb~|extern crate reussir_rt~} in a template resolves against an rlib that must have been built by the same rustc version that compiles the template.}
+\li{\strong{Symbol hashes ↔ rt build}: the emitted bitcode references non-generic \code{\verb~|reussir_rt~} internals through Rust-mangled names that embed the crate metadata hash (SVH) of the \em{specific} rt build it was compiled against. The final binary must link that same build's staticlib/dylib, or symbols go unresolved.}
+\li{\strong{LLVM bitcode ↔ Reussir's LLVM}: \code{\verb~|parseBitcodeFile~} in Reussir's LLVM (currently pinned to LLVM 23) can only read bitcode from an equal-or-older LLVM. A system rustc built on a newer LLVM emits bitcode we cannot parse; today there is no fallback.}
+}
+
+\p{Additionally, templates today require \strong{nightly} (\code{\verb~|#![feature(linkage)]~} for \code{\verb~|weak_odr~} dedup) and compile at the implicit \strong{edition 2015} (no \code{\verb~|--edition~} flag), and the runtime's sanitizer variants need \code{\verb~|-Zsanitizer~}/\code{\verb~|-Zbuild-std~}.}
+
+\p{The good news: \code{\verb~|crates/reussir-rt/src~} contains no \code{\verb~|#![feature]~} attributes. The only nightly dependencies are the \code{\verb~|mlir_sync/nightly~} cargo feature (optimization-only, per its own comment), the template \code{\verb~|#![feature(linkage)]~}, and the sanitizer builds.}
+}
+
+\subtree[design-system-rust-runtime-design]{
+\title{Design}
+
+\subtree[design-system-rust-runtime-s1]{
+\title{1. Distribution contents}
+
+\p{Ship, under \code{\verb~|<prefix>/share/reussir/runtime/~}:}
+
+\ul{
+\li{The \code{\verb~|reussir-rt~} crate source (self-contained: its own \code{\verb~|Cargo.toml~}, standalone — not a workspace member — plus \code{\verb~|Cargo.lock~}).}
+\li{A \code{\verb~|vendor/~} directory produced by \code{\verb~|cargo vendor~}, and a generated \code{\verb~|.cargo/config.toml~} pointing at it. This makes runtime builds fully offline and removes the git dependency on \code{\verb~|mlir-sync~} from user machines.}
+}
+
+\p{Stop shipping: \code{\verb~|rustc~}, \code{\verb~|cargo~}, \code{\verb~|rustdoc~}, \code{\verb~|rustlib/~}, toolchain \code{\verb~|libstd~} dylibs, the prebuilt \code{\verb~|deps/~} directory, and the prebuilt \code{\verb~|libreussir_rt.so~}.}
+
+\p{The shipped source is version-locked to the compiler: the compiler embeds templates that call specific rt APIs, so a given \code{\verb~|rrc~} release only consumes the rt source it ships with.}
+}
+
+\subtree[design-system-rust-runtime-s2]{
+\title{2. Toolchain policy: stable Rust with an MSRV}
+
+\p{To genuinely use "whatever rust is installed", the runtime and the polyffi templates must build on \strong{stable}:}
+
+\ul{
+\li{Declare \code{\verb~|rust-version~} (MSRV) in the rt \code{\verb~|Cargo.toml~}; the driver checks \code{\verb~|rustc --version~} against it with a clear diagnostic ("Reussir requires Rust >= 1.NN; found ...").}
+\li{Default the \code{\verb~|mlir_sync~} dependency's \code{\verb~|nightly~} feature off; re-enable it automatically when the resolved toolchain is a nightly (it only gates optimizations).}
+\li{Remove \code{\verb~|#![feature(linkage)]~} from templates. \code{\verb~|weak_odr~} dedup moves into the compiler: \code{\verb~|gatherCompiledModules~} already owns an \code{\verb~|llvm::Module~} per polyffi blob, so after import it rewrites the linkage of the generated \code{\verb~|__reussir_polyffi_*~} definitions (and the record-type \code{\verb~|Drop~}/\code{\verb~|Clone~} glue) to \code{\verb~|weak_odr~}. Same effect, no nightly attribute. (For the object-file fallback in §5, dedup is instead guaranteed by hashing monomorphized sources and compiling each distinct instantiation once per link unit.)}
+\li{Pass \code{\verb~|--edition 2021~} explicitly to the polyffi rustc invocation (\code{\verb~|extern crate~} remains valid; implicit edition-2015 goes away), and pass \code{\verb~|--extern reussir_rt=<exact rlib>~} + \code{\verb~|-L dependency=<deps dir>~} instead of bare \code{\verb~|-L~} directory hunting.}
+\li{Sanitized runtime variants stay a \em{developer} feature that requires a nightly toolchain; they are not part of the shipped product.}
+}
+
+\p{\code{\verb~|rust-toolchain.toml~} remains for developing Reussir itself, but CI gains a job that builds \code{\verb~|reussir-rt~} and runs the polyffi integration tests against current \strong{stable}, so stable compatibility cannot rot.}
+}
+
+\subtree[design-system-rust-runtime-s3]{
+\title{3. Toolchain resolution}
+
+\p{Replace \code{\verb~|RUSTC_HINTS~}/\code{\verb~|RUSTC_DEPS_HINTS~} with a resolution module used by all consumers (driver, tests, REPL):}
+
+\ol{
+\li{Explicit flag (\code{\verb~|rrc --rustc/--cargo~}) or config file entry.}
+\li{\code{\verb~|REUSSIR_RUSTC~} / \code{\verb~|REUSSIR_CARGO~} environment (kept for compatibility; lit tests keep using it to pin the in-repo toolchain).}
+\li{\code{\verb~|CARGO~}/\code{\verb~|RUSTC~} env, then \code{\verb~|PATH~} lookup (respects rustup shims, so a \code{\verb~|rust-toolchain.toml~} in the user's project still works naturally).}
+}
+
+\p{At resolution time run \code{\verb~|rustc -vV~} once and record: release version, commit hash, host triple, and \strong{LLVM version}. This record feeds the cache key (§4) and the bitcode/object mode decision (§5). A \code{\verb~|rrc doctor~} subcommand prints the resolved toolchain, cache state, and chosen polyffi mode.}
+}
+
+\subtree[design-system-rust-runtime-s4]{
+\title{4. On-demand runtime build with a shared cache}
+
+\p{The driver guarantees, before any polyffi compile or link-flag query, that the runtime is built for the resolved toolchain:}
+
+\ul{
+\li{Cache location: \code{\verb!!|${XDG_CACHE_HOME:-~/.cache}/reussir/rt/<key>/!!} where \code{\verb~|<key> = hash(rustc commit hash, rt source hash, target triple, profile, feature set)~}.}
+\li{Build: run \code{\verb~|cargo build --locked --offline --release --message-format=json~} in the shipped source dir with \code{\verb~|CARGO_TARGET_DIR=<cache>/target~}. Cargo's own fingerprinting handles staleness and concurrent invocations (file locking is built in).}
+\li{Parse the JSON messages to locate artifacts exactly (no directory guessing) and write a small \code{\verb~|manifest.json~} in the cache root recording: rlib path, staticlib path, cdylib path, \code{\verb~|deps/~} dir, rustc version, rustc LLVM version.}
+\li{First-use UX mirrors Koka's first \code{\verb~|kklib~} build: a one-time "Building Reussir runtime (once per Rust toolchain)..." message. \code{\verb~|rrc rt build~} allows explicit prebuild in CI images/containers.}
+}
+
+\p{Everything downstream reads the manifest:}
+
+\ul{
+\li{\strong{Polyffi compiles} pass \code{\verb~|--extern reussir_rt=<rlib>~} and \code{\verb~|-L dependency=<deps>~} from the manifest. Because the rlib was built by the same rustc now compiling the template, couplings (1) and (2) hold by construction.}
+\li{\strong{Final linking} stays with the user's C toolchain, but the flags come from the compiler: \code{\verb~|rrc --print link-flags~} (analogous to \code{\verb~|llvm-config~}) emits \code{\verb~|-L <cache> -lreussir_rt <platform sys libs>~}. Tests and build systems consume this instead of hardcoding \code{\verb~|%library_path~}.}
+}
+}
+
+\subtree[design-system-rust-runtime-s5]{
+\title{5. Runtime linkage: staticlib by default}
+
+\p{Switch the advertised link artifact from the Rust \em{dylib} to the \strong{staticlib} (\code{\verb~|crate-type~} already includes it). This removes the \code{\verb~|libstd-*.so~} runtime dependency entirely — the other half of why the toolchain had to be shipped. The cdylib/dylib remains available for embedders and the REPL (§7). \code{\verb~|--print link-flags~} adds the platform system libraries a staticlib needs (\code{\verb~|-lpthread -ldl -lm~}, the existing Windows and macOS lists).}
+}
+
+\subtree[design-system-rust-runtime-s6]{
+\title{6. Polyffi output modes: bitcode with an object fallback}
+
+\p{Coupling (3) — LLVM bitcode version — is handled by capability detection:}
+
+\ul{
+\li{\strong{Bitcode mode (preferred).} If the resolved rustc's LLVM major version ≤ Reussir's LLVM major version, keep today's flow: \code{\verb~|--emit=llvm-bc~}, embed, parse, \code{\verb~|llvm::Linker~} merge. Cross-language inlining and whole-module optimization are preserved. Since Reussir tracks recent LLVM (22) and stable rustc lags LLVM releases, this is the common case.}
+\li{\strong{Object mode (fallback).} Otherwise, compile the monomorphized module with \code{\verb~|--emit=obj~} and carry the bytes in a new \code{\verb~|compiledObject~} variant on \code{\verb~|ReussirPolyFFIOp~}. At emission, objects are written next to the main object and included in \code{\verb~|--print link-flags~} output (and for the JIT, added via \code{\verb~|LLVMOrcLLJITAddObjectFile~}). This sacrifices cross-language inlining but works with any rustc. The mode is reported by \code{\verb~|rrc doctor~} and overridable by flag for testing.}
+}
+
+\p{In both modes, distinct instantiations are deduplicated before invoking rustc by hashing the monomorphized source, so each template instantiation is compiled at most once per compilation.}
+}
+
+\subtree[design-system-rust-runtime-s7]{
+\title{7. REPL / JIT}
+
+\p{Today the REPL links \code{\verb~|reussir-rt~} in-process (a cargo path dependency built by whatever toolchain built the compiler distribution) and registers a fixed C-symbol list with ORC; polyffi is not exercised in the REPL. Under the new model this keeps working unchanged for non-polyffi use.}
+
+\p{Polyffi-in-REPL, when it lands, cannot resolve Rust-mangled internals against the embedded rt (different crate hashes than the user-cached build). The plan is to unify: the REPL resolves runtime symbols by loading the cached toolchain-matched cdylib through the existing \code{\verb~|OrcJit::add_library~} / \code{\verb~|runtime_library_path~} path (pointing at the §4 cache), instead of embedding a second copy — one runtime instance, same artifacts as AOT. This is deliberately a separate, later phase; mixing an embedded rt and a dlopened rt in one process (two allocators, two sets of globals) is the failure mode to avoid.}
+}
+
+\subtree[design-system-rust-runtime-s8]{
+\title{8. Build system, tests, CI}
+
+\ul{
+\li{\code{\verb~|crates/reussir-rt/CMakeLists.txt~}: delete the rustup fetch and toolchain-copy machinery (\code{\verb~|reussir-rust-toolchain-fetch~}, \code{\verb~|reussir-rust-install~}, ~150 lines). Keep the cargo build of rt into the build tree for the in-repo dev/test flow, and add install rules that stage the rt source + \code{\verb~|vendor/~} into \code{\verb~|share/reussir/runtime/~}.}
+\li{lit: keep exporting \code{\verb~|REUSSIR_RUSTC~}/\code{\verb~|REUSSIR_RUSTC_DEPS~} pinned at the developer toolchain and build-tree artifacts (hermetic in-repo tests), and add integration tests for the resolution/caching path itself plus a stable-toolchain polyffi test.}
+\li{\code{\verb~|flake.nix~}: drop the \code{\verb~|build/.rustup~} symlink hack once CMake no longer checks for a cached toolchain.}
+\li{\code{\verb~|nightly-release.yml~}: stop packaging toolchain binaries and \code{\verb~|rustlib~}; package the rt source + vendor tree instead (large artifact-size win). Release smoke test: install the artifact into a container with only system rust (both a rustup stable and a distro rust), compile and run a polyffi program.}
+}
+}
+
+\subtree[design-system-rust-runtime-s9]{
+\title{9. Migration phases}
+
+\ol{
+\li{\strong{Stable-ize the contract.} Templates lose \code{\verb~|#![feature(linkage)]~} (linkage rewrite lands in \code{\verb~|gatherCompiledModules~}); explicit \code{\verb~|--edition~} and \code{\verb~|--extern~}; \code{\verb~|mlir_sync/nightly~} off by default; CI job building rt + polyffi tests on stable.}
+\li{\strong{Toolchain resolution + rt cache.} New resolution module, cargo-driven cache with manifest, \code{\verb~|rrc rt build~} / \code{\verb~|rrc doctor~} / \code{\verb~|--print link-flags~}; polyffi and docs rewired to the manifest; staticlib becomes the documented default link artifact.}
+\li{\strong{Object-mode fallback} for LLVM version mismatch, including the \code{\verb~|compiledObject~} op variant and JIT object loading.}
+\li{\strong{Ship it.} Release/CI/packaging changes; delete toolchain-shipping paths and \code{\verb~|RUSTC_*_HINTS~}; docs (www chapter) updated.}
+\li{\strong{(Later) REPL unification} on the cached runtime for polyffi-in-JIT.}
+}
+
+\p{Phases 1–2 are independently landable and immediately de-risk the current setup; the shipped-toolchain path can remain as a deprecated fallback until phase 4.}
+}
+}
+
+\subtree[design-system-rust-runtime-open-questions-decisions]{
+\title{Open questions / decisions}
+
+\ul{
+\li{\strong{MSRV choice}: pick the oldest stable that supports edition 2024 and the rt's dependency tree (≥ 1.85); verify \code{\verb~|stacker~}, \code{\verb~|libmimalloc-sys~}, and \code{\verb~|mlir_sync~} (sans \code{\verb~|nightly~}) build there.}
+\li{\strong{Cache vs per-project builds}: this design uses a shared per-user cache keyed by toolchain+source hash (Koka builds per project). Cargo's target dir gives us safe sharing for free; a \code{\verb~|--rt-target-dir~} escape hatch can serve hermetic build systems (Nix, Bazel) that want project-local builds.}
+\li{\strong{Cross-compilation}: \code{\verb~|rene~} keys runtime bakes by target and propagates the selected triple to Cargo and \code{\verb~|rrc~}. Individual targets still need compatible runtime features, linkers, and Rust standard-library components before the full cross-compilation flow is supported.}
+\li{\strong{Windows}: staticlib-by-default sidesteps the \code{\verb~|reussir_rt.dll~} + \code{\verb~|libstd~} DLL story; MSVC vs GNU toolchain flavor must match the user's C toolchain — detect from the rustc host triple and warn on mismatch.}
+}
+}

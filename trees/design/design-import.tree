@@ -1,0 +1,89 @@
+\title{Import}
+\taxon{Design}
+\date{2026-07-20}
+\author{claude}
+\contributor{schrodingerzy}
+\tag{design}
+\meta{created}{2026-07-20}
+\meta{updated}{2026-07-20}
+\meta{origin}{docs/design/import.md}
+\import{base-macros}
+
+\subtree[design-import-motivation]{
+\title{Motivation}
+
+\p{Reussir names every item by its module path. That keeps resolution simple and unambiguous, but common references — above all the built-in intrinsics — get long fast:}
+
+\pre{\verb~|
+core::intrinsic::array::set(a, i, core::intrinsic::array::get(a, i) + v)
+~}
+
+\p{\code{\verb~|import~} introduces \strong{file-scoped path abbreviations} so the same call can read:}
+
+\pre{\verb~|
+import core::intrinsic::array;
+...
+array::set(a, i, array::get(a, i) + v)
+~}
+}
+
+\subtree[design-import-surface-syntax]{
+\title{Surface syntax}
+
+\p{One top-level item form, ending in \code{\verb~|;~}:}
+
+\pre{\verb~|
+import-stmt ::= 'import' path ('as' name)? ';'
+~}
+
+\ul{
+\li{\code{\verb~|import a::b::c;~} binds the \em{last segment} (\code{\verb~|c~}) to the path \code{\verb~|a::b::c~}.}
+\li{\code{\verb~|import a::b::c as d;~} binds \code{\verb~|d~} to \code{\verb~|a::b::c~}.}
+}
+
+\p{The target path is not restricted to modules: because a binding is a plain path rewrite, \code{\verb~|import~} works identically for a function, a record, a constructor qualifier, or an intrinsic family — \code{\verb~|import pkg::List as L;~} and \code{\verb~|import core::intrinsic::math::sqrt as rt;~} are ordinary imports. There is deliberately no separate \code{\verb~|alias~} item; renaming is spelled with \code{\verb~|as~}.}
+
+\p{\code{\verb~|import~} is a hard keyword in the lexer but — like every Reussir keyword — remains usable as an ordinary identifier in identifier positions (\verb~|[~\code{\verb~|SyntaxKind::is_ident_like~}\verb~|]~). The REPL routes \code{\verb~|import~} followed by an identifier to the item parser, mirroring the \code{\verb~|fn~}/\code{\verb~|mod~} convention.}
+}
+
+\subtree[design-import-semantics]{
+\title{Semantics}
+
+\p{A binding maps one identifier to a reference path. Bindings are:}
+
+\ul{
+\li{\strong{File-scoped}: they apply to every item in the file that declares them (order-independent, like item declarations) and are invisible to other files, including other files of the same package.}
+\li{\strong{Private}: \code{\verb~|pub import~} is an error; bindings do not re-export.}
+\li{\strong{Namespace-agnostic}: a binding is a path rewrite, not a def reference. The same binding abbreviates a function path, a record path, a constructor qualifier, or an intrinsic family, depending on where it is used.}
+\li{\strong{Checked for clashes}: two bindings of the same name in one file are an error. The names \code{\verb~|core~}, \code{\verb~|root~}, and \code{\verb~|super~} cannot be bound (they are the reserved path heads).}
+}
+
+\subtree[design-import-expansion]{
+\title{Expansion}
+
+\p{Everywhere the elaborator resolves a reference path (function calls, constructor calls and patterns, variable references, type expressions, and \code{\verb~|extern~} trampoline targets), the path is first \strong{expanded}:}
+
+\ul{
+\li{A qualified path whose \em{first segment} is bound has that segment replaced by the binding's target path (\code{\verb~|arr::get~} with \code{\verb~|import core::intrinsic::array as arr~} becomes \code{\verb~|core::intrinsic::array::get~}).}
+\li{A bare name that is bound is replaced by the target path outright (\code{\verb~|rt~} with \code{\verb~|import core::intrinsic::math::sqrt as rt~} becomes the full path).}
+}
+
+\p{Expansion iterates, so a binding may target another binding; a self-referential chain abandons expansion entirely, so the reference fails resolution with the ordinary "unknown" diagnostic on the path as written. Expansion happens \em{before} the built-in path checks, so bindings work uniformly for user items and for the built-in \code{\verb~|core~} intrinsics, \code{\verb~|Nullable~}, and \code{\verb~|Arc~} spellings. Diagnostics print the expanded path, keeping error text identical to the fully-qualified spelling.}
+}
+
+\subtree[design-import-shadowing]{
+\title{Shadowing}
+
+\p{Local bindings win over imports: a \code{\verb~|let~}-bound or parameter name shadows a same-named import in expression positions, exactly as it shadows a top-level function. Generic parameters likewise win in type positions. An import in turn takes precedence over module-relative resolution of the same bare name, since expansion runs before lookup — a file that imports a name it also declares is better served by renaming the import (\code{\verb~|as~}).}
+}
+}
+
+\subtree[design-import-implementation-notes]{
+\title{Implementation notes}
+
+\ul{
+\li{The parser produces \code{\verb~|ImportStmt~} nodes; the surface layer projects them into \code{\verb~|StmtKind::Import(ImportDecl { name, path, … })~}.}
+\li{The elaborator collects bindings per \code{\verb~|FileId~} during the statement scan of \code{\verb~|run_files~}, before any resolution runs, and consults them in \code{\verb~|expand_path~} (\code{\verb~|semi/ctxt.rs~}), which is applied in the shared \code{\verb~|resolve_*_ref~} helpers plus the entry points that perform textual built-in checks (\code{\verb~|infer_func_call~}, \code{\verb~|infer_ctor~}, \code{\verb~|check_ctor_pat~}, \code{\verb~|eval_type_expr~}).}
+\li{Bindings live in an append-only vector so the REPL checkpoint/rollback machinery restores them by truncation like every other elaborator table.}
+}
+}

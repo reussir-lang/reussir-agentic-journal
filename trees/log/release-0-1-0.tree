@@ -1,0 +1,40 @@
+\title{Release notes: 0.1.0}
+\tag{release}
+
+
+
+\p{Changelog entries of this release, by area. The entries are listed collapsed; open one to read it in full.}
+
+\subtree[release-0-1-0-language]{
+\title{Language}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{log-OQQC}
+\transclude{log-6XR9}
+\transclude{log-YSJ6}
+\transclude{log-HLNA}
+}
+}
+
+\subtree[release-0-1-0-compiler-runtime]{
+\title{Compiler and runtime}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{log-LBGF}
+\transclude{log-G74S}
+\transclude{log-BM8O}
+}
+}
+
+\subtree[release-0-1-0-tooling]{
+\title{Tooling}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{log-YYJO}
+\transclude{log-EJGT}
+\transclude{log-HIV8}
+}
+}

@@ -1,0 +1,15 @@
+\title{\code{\verb~|rrc --instrument-nonlinear-ffi~} instruments non-linear FFI and array usage}
+\taxon{Change}
+\date{2026-08-22}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{compiler-runtime}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{575}
+\import{base-macros}
+
+\p{\code{\verb~|rrc --instrument-nonlinear-ffi~} (and the matching \code{\verb~|instrument_nonlinear_ffi~} profile knob in \code{\verb~|rene~}) instruments non-linear ffi/array usage: the new \code{\verb~|reussir-instrument-nonlinear-ffi~} pass guards every FFI-import call that consumes an rc'd \code{\verb~|ffi_object~}/\code{\verb~|array~} argument with a reference-count check, and a count other than one calls the new runtime entry point \code{\verb~|__reussir_report_nonlinear_usage(file, line, col)~}, which reports the call's source location on stderr. A still-shared value at the consuming boundary is the signature that the foreign side degrades to copy-on-write instead of updating in place; the check is purely diagnostic and runs after all rc optimization passes, so the observed count is the final one.}
+
+\p{Landed in \pr{575}.}

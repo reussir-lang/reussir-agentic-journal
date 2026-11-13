@@ -1,0 +1,14 @@
+\title{\code{\verb~|&&~} and \code{\verb~|||~} short-circuit}
+\taxon{Change}
+\date{2026-08-11}
+\author{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{564}
+\import{base-macros}
+
+\p{\code{\verb~|&&~} and \code{\verb~|||~} now short-circuit. Elaboration desugars them into the conditional — \code{\verb~|l && r~} to \code{\verb~|if l { r } else { false }~} and \code{\verb~|l || r~} to \code{\verb~|if l { true } else { r }~} — so the right operand becomes a branch body and lowers to \code{\verb~|scf.if~} like every other conditional. They previously elaborated to \code{\verb~|ArithOp::And~}/\code{\verb~|Or~} alongside the bitwise operators and emitted \code{\verb~|arith.andi~}/\code{\verb~|arith.ori~}, which evaluate both operands: a guard such as \code{\verb~|d != 0 && n / d > 1~} divided by zero, and an early-exit traversal written with \code{\verb~|||~} visited every node. The eager \code{\verb~|ArithOp~} forms stay reachable from hand-written HIR/MIR text, where they keep their bitwise meaning.}
+
+\p{Landed in \pr{564}.}

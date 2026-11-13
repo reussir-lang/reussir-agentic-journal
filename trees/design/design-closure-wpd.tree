@@ -1,0 +1,63 @@
+\title{Whole-program devirtualization for closures}
+\taxon{Design}
+\date{2026-07-10}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\contributor{yekai-pan}
+\tag{design}
+\meta{created}{2026-07-10}
+\meta{updated}{2026-10-11}
+\meta{origin}{docs/design/closure-wpd.md}
+\import{base-macros}
+
+\subtree[design-closure-wpd-the-model]{
+\title{The model}
+
+\p{A closure box is \code{\verb~|{refcnt, vtable, cursor, payload…}~} behind an rc pointer; its vtable is three slots, \code{\verb~|{drop, clone, evaluate}~}. The slot ABIs depend on nothing beyond the closure's \strong{return type}:}
+
+\ul{
+\li{\code{\verb~|evaluate~} is \code{\verb~|fn(rc<box>) -> c~} — \code{\verb~|closure.eval~} is verified fully-applied and the outlined function reads \strong{every} argument from the payload;}
+\li{\code{\verb~|drop~} is \code{\verb~|fn(rc) -> void~} and \code{\verb~|clone~} is \code{\verb~|fn(rc) -> rc~} — signature-free.}
+}
+
+\p{\code{\verb~|closure.apply~}/\code{\verb~|closure.uniqify~}/\code{\verb~|closure.clone~} never change the vtable — only the static type (one fewer leading parameter) and the cursor. The return type is therefore the one component of the static type that every value backed by a given vtable agrees on, and the strongest fact a call site can assert about the vtable it is about to dispatch through. That yields the whole id scheme: \strong{one type id per closure return type} (\code{\verb~|reussir.closure.wpd.<b62(blake3(text(c)))>~}, built in \code{\verb~|ClosureWpd.h~}, where \code{\verb~|text(c)~} is \code{\verb~|c~} printed by \code{\verb~|printTypeWithRecordBodiesOnce~}: the usual form, except that each named record's body is written only at its first occurrence and later as \code{\verb~|<kind "name">~}, so a record nested along many paths costs its body once; identical return types produce identical ids in any module). Captures fold in for free — the frontend materializes a capture as a pre-applied leading parameter, so a capturing closure shares the id of every closure with the same visible return type.}
+
+\p{The traversal follows member order, and the reference includes both record kind and name, which together unique a named record within its context. Its body is still included once, so same-named records with different bodies in different contexts remain distinguishable. Ordinary MLIR printing is unchanged. Types without repeated named records retain their previous ids; repeated-record types get new ids, consistently at both vtables and call sites. These ids are compiler metadata, not a stable cross-version serialization format. Unnamed composite types are still printed at each occurrence; this does not address exponential sharing composed entirely of unnamed types.}
+
+\p{This maps directly onto LLVM's stock WPD contract:}
+
+\ul{
+\li{each closure vtable global (a \code{\verb~|constant~} with the three function pointers at offsets 0/8/16) carries \code{\verb~|!type !{i64 0, !"<id>"}~} plus translation-unit \code{\verb~|!vcall_visibility~};}
+\li{each indirect slot call site asserts its operand's id with \code{\verb~|llvm.type.test~} + \code{\verb~|llvm.assume~}, \strong{on the very vtable-pointer SSA value the slot load and call hang off}. This discipline is load-bearing: \code{\verb~|WholeProgramDevirt~} discovers devirtualizable calls by a pure def-use walk from the tested pointer (constant-offset GEPs → load → call, dominance required), with no aliasing reasoning — testing a separate load of the same slot would silently disconnect the assertion from the call.}
+}
+
+\p{WPD devirtualizes per (type id, slot byte offset), so drop (0), clone (8) and evaluate (16) fold independently.}
+}
+
+\subtree[design-closure-wpd-speculative-devirtualization-sound-on-any-world]{
+\title{Speculative devirtualization — sound on any world}
+
+\p{The backend runs \code{\verb~|WholeProgramDevirtPass(nullptr, nullptr, /*DevirtSpeculatively=*/true)~}. In this mode a single-implementation family is not folded unconditionally: WPD \strong{versions the call site} — compare the loaded function pointer against the sole implementation, direct call (which then inlines) on the likely arm, the original indirect call as the fallback. A vtable the module has never seen simply takes the fallback, so the transform needs no closed-world assumption: \code{\verb~|closure-wpd~} is a compile-time knob, not a soundness gate. Partitioned builds (\code{\verb~|--codegen-units N~}) and even JIT increments could opt in — each module devirtualizes the families it sees whole and leaves the rest indirect. Speculative mode also structurally skips branch funnels and virtual constant propagation, neither of which survives instruction selection outside the LTO pipelines (a funnel emitted here would abort codegen: "all llvm.icall.branch.funnel operands must refer to the same GlobalValue").}
+
+\p{The \code{\verb~|!vcall_visibility~} stamp is not required by speculative mode; it is kept because it is free and leaves an unconditional closed-world WPD mode — no guard, but single-CGU-only and genuinely unsound cross-module — one pipeline switch away should the guard ever show up in profiles.}
+}
+
+\subtree[design-closure-wpd-pipeline]{
+\title{Pipeline}
+
+\p{\code{\verb~|rrc~} (on by default at \code{\verb~|-O aggressive~}/\code{\verb~|-O size~}; \code{\verb~|--no-closure-wpd~} opts out) → \code{\verb~|LoweringOptions::closure_wpd~} → the basic-ops lowering prologue stamps each outlined vtable op with its id (\code{\verb~|reussir.wpd.type_id~}) and marks the module (\code{\verb~|reussir.wpd~}) → the vtable conversion pattern carries the id onto the vtable global; the dispatch conversion patterns (eval/clone/drop) emit a \code{\verb~|reussir.closure.wpd_test~} directly on the vtable pointer they just loaded → at \code{\verb~|translateModuleToLLVMIR~}, the dialect's LLVM translation interface — the LLVM dialect can express neither \code{\verb~|!type~} metadata nor \code{\verb~|llvm.type.test~}'s metadata-string operand — stamps the metadata and lowers each \code{\verb~|wpd_test~} into \code{\verb~|llvm.type.test~} + \code{\verb~|llvm.assume~} → the backend LLVM pipeline (\code{\verb~|reussirRunBackendLLVMPipeline~}, shared by the AOT compiler and the JIT) runs speculative \code{\verb~|WholeProgramDevirt~} before the per-module pipeline (so guarded direct calls inline), then \code{\verb~|LowerTypeTests~} in drop-Assume mode so no \code{\verb~|llvm.type.test~} reaches instruction selection. Modules lowered without \code{\verb~|closure-wpd~} (REPL/JIT increments among them) carry no type tests and keep their pipeline unchanged.}
+
+\p{Because the type test is emitted on the same SSA load the call consumes, the pipeline needs no GVN run to connect them, and because speculative mode never emits funnels, no \code{\verb~|cl::opt~} surgery is needed either — the whole integration is two stock passes.}
+}
+
+\subtree[design-closure-wpd-what-the-scheme-trades-away]{
+\title{What the scheme trades away}
+
+\p{Ids are keyed by return type only, so single-impl devirt fires iff the module has exactly one closure per return type (speculative mode also disregards trivial empty \code{\verb~|void~} slot functions when collecting targets). A finer family scheme (per-suffix signature tiers with a dataflow that strengthens eval sites past the family root) can recover modules where several closures share a return type but a richer static suffix isolates one implementation; it was tried (PRs \pr{372}/\pr{373}), costs ~10× the machinery, and is an incremental layer on top of this design if benchmarks ever demand it.}
+}
+
+\subtree[design-closure-wpd-invariant-canary]{
+\title{Invariant canary}
+
+\p{Everything above rests on the \code{\verb~|evaluate~} ABI reading all arguments from the payload. \code{\verb~|tests/integration/conversion/closure_wpd_ids.mlir~} pins both that signature and the id scheme (two closures with different signatures but the same return type share one id); if evaluation ever passes remaining arguments in registers, the slot ABI depends on more than the return type and the per-return-type ids must be reworked.}
+}

@@ -1,0 +1,12 @@
+\title{\code{\verb~|std::collections::cow~} grows five more containers}
+\taxon{Change}
+\date{2026-08-22}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\import{base-macros}
+
+\p{\code{\verb~|std::collections::cow~} grows five more containers over the runtime's Rust structures (\code{\verb~|reussir_rt::collections::{vec, vec_deque, btree_map, btree_set, binary_heap}~}): \code{\verb~|Vec~} (push/pop/get/set/insert_at/ remove_at/last), \code{\verb~|VecDeque~} (push/pop at both ends, front/back/get), \code{\verb~|BTreeMap~} and \code{\verb~|BTreeSet~} (insert/get/contains/remove plus first/last), and \code{\verb~|BinaryHeap~} (push/pop/peek — Rust's max-heap; reverse the \code{\verb~|Ord~} for a min-heap). The ordered containers compare through the \code{\verb~|Ord~} bridge; the sequences need no bounds beyond FFI-crossability. All follow the module's copy-on-write contract: in-place when uniquely owned, one clone when shared, and empty pops and lookup misses never clone.}

@@ -1,0 +1,16 @@
+\title{Standing policies}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+
+\p{Rules the maintainers have given for how agents work with this journal. When a maintainer gives a new lasting instruction, add it here in the same session, with the date.}
+
+\ul{
+\li{\strong{Notes live out of tree.} Design notes, changelog entries, decisions, open problems, examples and motivations are written here and not in the Reussir repository. See [the decision](dec-J7QK). Given 2026-11-13.}
+\li{\strong{Write freely.} An agent updates the journal as part of its work and does not need to ask first. Given 2026-11-13.}
+\li{\strong{One marker in code.} Reussir source refers to a tree only as \code{\verb~|*agentic-note*: <address>~}. See [the decision](dec-M2XD). Given 2026-11-13.}
+\li{\strong{Identity is recorded.} Every tree names the agent that wrote it and the person who directed the session; every session leaves a session tree. Given 2026-11-13.}
+\li{\strong{No conversation references.} A tree may cite pull requests, issues and session trees, and never the content of a chat. Write for a reader who has no access to the conversation. Carried over from the Reussir agent instructions.}
+\li{\strong{Forester before jujutsu.} The repository is managed with jujutsu on top of git. If Forester ever needs something jujutsu cannot handle, such as a git submodule for the theme, keep Forester and drop jujutsu. Given 2026-11-13.}
+\li{\strong{Tools come from the flake.} Forester and jujutsu are provided by the development shell of this repository and are not expected on the host. Given 2026-11-13.}
+}

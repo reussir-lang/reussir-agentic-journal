@@ -1,0 +1,27 @@
+\title{Build Forester with OxCaml}
+\taxon{Problem}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{journal}
+\tag{tooling}
+\meta{status}{open}
+\meta{created}{2026-11-13}
+
+\p{\strong{Status:} open.}
+
+\p{\strong{Question.} Can the Forester used by this journal be compiled with \<html:a>[href]{https://oxcaml.org/}{OxCaml} instead of the stock OCaml compiler, inside the Nix flake?}
+
+\p{\strong{What is known, as of 2026-11-13.}}
+
+\ul{
+\li{Forester 6.0 requires \code{\verb~|lsp >= 1.28.1~} and \code{\verb~|jsonrpc >= 1.28.1~}. The OxCaml opam repository blocks every upstream version of both packages and offers only its own fork, up to 1.24.0. The dependency set therefore does not resolve without relaxing the bound, and the Forester language server may not compile against the older fork.}
+\li{Forester 5.0 has looser bounds but pulls in \code{bisect_ppx}, which needs an older \code{ppxlib} than the patched one OxCaml ships. It would have to be stripped out, and \code{ppx_repr} is untested against the patched \code{ppxlib}.}
+\li{nixpkgs has no OxCaml package. The OxCaml repository has a flake that exports the compiler but no package set, and its binary cache is meant for its own CI only, so the compiler is built from source.}
+\li{The upstream Forester package is a static musl build. OxCaml supports glibc only, so the glibc build would have to be used.}
+\li{No report of anyone building Forester with OxCaml was found.}
+}
+
+\p{\strong{Most plausible route.} Use opam-nix with the OxCaml opam repository listed before the upstream one, request \code{\verb~|ocaml-variants = 5.4.0+ox~} instead of the system compiler, and patch the \code{lsp} and \code{jsonrpc} bounds in the Forester sources. Expect small source fixes in dependencies of the kind OxCaml already carries for others, such as eta-expanding partial applications.}
+
+\p{\strong{What would close this.} Either an OxCaml release whose package set admits \code{\verb~|lsp >= 1.28.1~}, or a Forester build that makes the language server optional. Until then the journal follows [dec-R4BV](dec-R4BV).}

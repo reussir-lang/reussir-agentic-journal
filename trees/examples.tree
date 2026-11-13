@@ -1,0 +1,19 @@
+\title{Examples and motivations}
+
+\p{Worked examples and the motivating cases behind a design. They are kept as separate trees so that several design notes can transclude the same one.}
+
+\subtree[examples-list]{
+\title{Examples}
+
+\query\datalog{
+ ?X -: {\rel/has-taxon ?X '{Example}}
+}
+}
+
+\subtree[motivations-list]{
+\title{Motivations}
+
+\query\datalog{
+ ?X -: {\rel/has-taxon ?X '{Motivation}}
+}
+}

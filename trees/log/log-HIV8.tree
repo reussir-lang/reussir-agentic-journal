@@ -1,0 +1,15 @@
+\title{MLIR tools and LLDB pretty-printers}
+\taxon{Change}
+\date{2026-07-30}
+\author{claude}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{tooling}
+\tag{v0.1.0}
+\meta{release}{0.1.0}
+\meta{pr}{486}
+\import{base-macros}
+
+\p{MLIR tools (\code{\verb~|reussir-opt~}, \code{\verb~|reussir-translate~}, \code{\verb~|reussir-llvm-opt~}) and LLDB pretty-printers.}
+
+\p{Landed in \pr{486}.}

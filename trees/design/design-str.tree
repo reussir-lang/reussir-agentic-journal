@@ -1,0 +1,43 @@
+\title{\code{\verb~|str~}: the immutable static string}
+\taxon{Design}
+\date{2026-08-22}
+\author{claude-fable-5}
+\contributor{schrodingerzy}
+\tag{design}
+\meta{created}{2026-08-22}
+\meta{updated}{2026-08-23}
+\meta{origin}{docs/design/str.md}
+\import{base-macros}
+
+\p{Reussir's \code{\verb~|str~} is exactly a string \em{literal}: a borrowed \code{\verb~|{ptr, len}~} view of an immutable global, interned by content (BLAKE3 \code{\verb~|StringToken~}, one \code{\verb~|reussir.str.global~} per distinct payload, shared across compilation units by construction of the name). There is no mutation and no concatenation on \code{\verb~|str~} — every growable or mutable string lives outside the language, as an FFI-wrapped Rust \code{\verb~|String~} (\code{\verb~|std::string::String~}, wrapping \code{\verb~|reussir_rt::collections::string::String~}: an rc-boxed copy-on-write value crossing as an opaque \code{\verb~|ffi_object~}) or a future functional rope built on the \code{\verb~|cow~}/\code{\verb~|pure~} collections.}
+
+\subtree[design-str-what-a-str-can-do]{
+\title{What a \code{\verb~|str~} can do}
+
+\ul{
+\li{\strong{Exist and match}: \code{\verb~|"hello"~} types as \code{\verb~|str~}; \code{\verb~|match~} on string patterns compiles to a compressed-trie dispatch (\code{\verb~|reussir.str.select~}).}
+\li{\strong{Be read}: \code{\verb~|core::intrinsic::str::{len, byte_at, slice}~} — byte granularity throughout. \code{\verb~|byte_at~} is bounds-checked (\code{\verb~|0~} out of bounds), \code{\verb~|slice~} clamps past the end and may split a multi-byte character; both mirror the dialect ops one for one.}
+\li{\strong{Compare}: the full builtin tower — \code{\verb~|PartialEq~}/\code{\verb~|Eq~}/\code{\verb~|PartialOrd~}/\code{\verb~|Ord~} (\code{\verb~|core::cmp~}). Equality and ordering are byte-wise lexicographic with length as the shared-prefix tiebreak, through \code{\verb~|reussir.str.equal~} / \code{\verb~|reussir.str.compare~} (\code{\verb~|compare~} follows the \code{\verb~|memcmp~} sign convention). Both expand inline in \code{\verb~|reussir-convert-to-std~} — the layering every high-level op follows — with \code{\verb~|scf.if~} carrying only the fast paths: the \code{\verb~|str.ref_eq~} view-identity check (same \code{\verb~|{ptr, len}~} pair, no byte scan) and, for equality, the length gate. The main comparison stays a \code{\verb~|memcmp~} call through the straight-line \code{\verb~|str.unsafe_memcmp~} residue; the residues (\code{\verb~|ref_eq~} as a two-field compare, \code{\verb~|unsafe_memcmp~} as the libc call) lower at the LLVM level.}
+\li{\strong{Hash}: \code{\verb~|Hasher~} carries \code{\verb~|write_str~}, and \code{\verb~|Hash for str~} routes through it. Each hasher's chunked byte protocol (Fx words for \code{\verb~|FastHasher~}, the aHash pair updates for \code{\verb~|StrongHasher~}) is implemented in \code{\verb~|reussir_rt::hash~}, continuing the hasher's algorithm from its current state; the word-granular reads need raw-pointer access the surface language cannot express yet (TODO: go native when bare-pointer intrinsics land). The ordered containers key on the runtime \code{\verb~|Str~}'s byte-wise \code{\verb~|Ord~}, which matches \code{\verb~|str.compare~}.}
+\li{\strong{Cross the FFI boundary}: a \code{\verb~|str~} parameter or return renders as \code{\verb~|::reussir_rt::collections::string::Str<'static>~} — a \code{\verb~|#[repr(C)]~} \code{\verb~|{ptr, len}~} bit-identical to the lowered value. Sound because every surface \code{\verb~|str~} today is a \code{\verb~|'static~} global literal.}
+\li{\strong{Sit in records}: \code{\verb~|str~} carries \code{\verb~|DataLayoutTypeInterface~} (two pointer-words) and is trivially copyable — no rc glue, plain loads and stores.}
+}
+}
+
+\subtree[design-str-lifescope]{
+\title{Lifescope}
+
+\p{The dialect type is \code{\verb~|!reussir.str<global | local>~}; the frontend type carries no lifescope and every surface value is \code{\verb~|<global>~} (\code{\verb~|<local>~} appears only transiently inside \code{\verb~|match~} lowering, where \code{\verb~|str.cast~} downgrades before \code{\verb~|str.select~}). When borrowed/derived strs surface — e.g. views into an FFI \code{\verb~|String~} — the frontend type needs the lifescope split, and the \code{\verb~|'static~} FFI spelling and the unconditional \code{\verb~|Sync~} verdict (\code{\verb~|semi/traits/sync.rs~}) must be revisited together.}
+}
+
+\subtree[design-str-deferred]{
+\title{Deferred}
+
+\ul{
+\li{Debug info for \code{\verb~|str~} locals: needs a pointer-carrying DBG attribute in the dialect (\code{\verb~|ReussirAttrs.td~} has int/fp/record/boxed only); \code{\verb~|-g~} currently omits \code{\verb~|str~} variables, unchanged from before.}
+\li{\code{\verb~|OnceODR~} dedup of \code{\verb~|str.global~} across compilation units (TODO in \code{\verb~|BasicOpsLowering.cpp~}): today identical literals in two units are two private globals — correct, not pointer-identical.}
+\li{\code{\verb~|const~} items: a named literal is spelled as a nullary \code{\verb~|fn~} today.}
+\li{\code{\verb~|panic~} with a message: the intrinsic takes no arguments; the dialect op already carries a message attribute.}
+\li{Surface \code{\verb~|startswith~}: the dialect op takes an attribute pattern; \code{\verb~|match~} covers prefix dispatch, and a dynamic prefix test can be built from \code{\verb~|len~}/\code{\verb~|slice~}/\code{\verb~|==~}.}
+}
+}

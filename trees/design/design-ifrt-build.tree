@@ -1,0 +1,90 @@
+\title{IFRT tooling}
+\taxon{Design}
+\date{2026-09-26}
+\author{schrodingerzy}
+\tag{design}
+\meta{created}{2026-09-26}
+\meta{updated}{2026-10-14}
+\meta{origin}{docs/design/ifrt-build.md}
+\import{base-macros}
+
+\p{\code{\verb~|REUSSIR_ENABLE_OPENXLA=ON~} enables StableHLO and IFRT together. The IFRT build target adds IFRT/VIFRT dialects, Shardy's SDY dialect, selected preparation passes, and program serialization. There is no separate IFRT feature option.}
+
+\pre{\verb~|
+cmake -S . -B build -DREUSSIR_ENABLE_OPENXLA=ON
+cmake --build build --target reussir-opt reussir-ifrt-translate
+python3 tests/integration/lit build/tests/integration -v --filter 'ifrt/'
+~}
+
+\p{IFRT has no upstream CMake build. \code{\verb~|cmake/ifrt~} uses Bazel 8.7.0 (provided by \code{\verb~|nix develop~}) to build upstream IFRT libraries, with Reussir's LLVM/MLIR and StableHLO supplied by CMake. The adapter currently requires native Linux, Clang, and the installed LLVM shared library for a host TableGen helper. Linux x86-64 and AArch64 CI both enable StableHLO and IFRT.}
+
+\p{Set \code{\verb~|REUSSIR_BAZEL_EXECUTABLE~} to select Bazel or Bazelisk and \code{\verb~|REUSSIR_IFRT_JOBS~} to limit parallelism (default 8). The first build downloads and compiles IFRT's dependencies; later invocations use \code{\verb~|build/cmake/ifrt/cache~}.}
+
+\p{The XLA archive is pinned to \code{\verb~|fc840b37e26bd36c99f32e295324a1700dc12ecd~} and SHA-256 checked. For a local checkout of that revision, configure with \code{\verb~|-DFETCHCONTENT_SOURCE_DIR_XLA=/path/to/xla~}. See also the [StableHLO build notes](design-stablehlo-build) for its pin and source override.}
+
+\subtree[design-ifrt-build-preparing-and-serializing-a-program]{
+\title{Preparing and serializing a program}
+
+\p{\code{\verb~|ifrt-to-outlined-atom-programs-pipeline~} verifies donation and sharding, outlines atom programs, normalizes copies/reshards, and adds control dependencies. A tensor function called by \code{\verb~|ifrt.Call @kernel~} becomes a nested \code{\verb~|module @kernel~} with \code{\verb~|func.func @main~}; the call becomes \code{\verb~|ifrt.Call @kernel::@main(...) on devices [...]~}.}
+
+\pre{\verb~|
+build/bin/reussir-opt tests/integration/ifrt/program.mlir \
+  --ifrt-to-outlined-atom-programs-pipeline -o /tmp/model.mlir
+build/bin/reussir-ifrt-translate /tmp/model.mlir --serialize \
+  --strip_debuginfo -o /tmp/model.ifrt.bc
+build/bin/reussir-ifrt-translate /tmp/model.ifrt.bc --deserialize
+~}
+
+\p{The translator uses upstream \code{\verb~|Serialize(IfrtIRProgram, options)~} and \code{\verb~|Deserialize<IfrtIRProgram>~}. The file is the standard \code{\verb~|Serialized~} protobuf envelope containing VIFRT orchestration bytecode and versioned StableHLO/VHLO atom programs. \code{\verb~|--deserialize~} restores program IR; it neither compiles the kernels nor loads a device executable.}
+
+\p{\code{\verb~|--ifrt_version~}, \code{\verb~|--atom_program_version~}, and \code{\verb~|--atom_program_sdy_version~} default to \code{\verb~|current~}. Upstream IFRT, StableHLO, and Shardy validate their supported version ranges. Bare MLIR bytecode is not this program envelope.}
+
+\p{IFRT array types carry shape, element type, sharding, logical devices, optional memory kind, and optional layout. These describe the program; registering the dialect does not create a runtime array, and program serialization does not execute kernels. No Linalg lowering is used in this artifact path.}
+
+\p{The RC/IFRT bridge operations have LLVM lowering for static and dynamic shapes. \code{\verb~|reussir.array.to_ifrt~} borrows the device-handle descriptor from an RC array without changing its reference count, copying data, or waiting for the device. The array must describe a complete buffer: a nonzero offset fails at runtime. \code{\verb~|reussir.array.from_ifrt~} adopts an owned call result into a new RC descriptor, using an allocation token for the host metadata and preserving shard order. It does not allocate device storage. The existing bridge verifiers enforce matching metadata, forbid donation of borrowed inputs, and require each adopted result to have exactly one use.}
+
+\p{Borrowing preserves the descriptor's dynamic global extents without querying the backend. When adopting a dynamically shaped result, \code{\verb~|array.from_ifrt~} accepts \code{\verb~|extents(%d0, %d1, ...)~} for all dynamic global dimensions, in dimension order. Explicit extents are required when a dynamic dimension is partitioned: physical buffers of extent three on two devices cannot distinguish global extent five from six. The caller supplies that logical shape; the compiler checks that all buffer shapes are compatible with it and with the static dimensions, using ceiling division by the shard counts. Unpartitioned dynamic dimensions can still be inferred from buffer queries when explicit extents are omitted. Negative extents, incompatible physical shapes, and index-width overflow fail at runtime. Dimension queries may wait for the backend, but do not copy data or allocate device storage. Only dynamic global extents are stored in the RC box.}
+
+\p{\code{\verb~|reussir.ifrt.bytecode~} lowers to an internal, immutable LLVM global containing \code{\verb~|{[64 x i8], [N x i8]}~}: the hexadecimal BLAKE3 checksum followed by the exact MLIR bytecode payload. Neither field includes a trailing NUL. The symbol name is preserved so prepared \code{\verb~|reussir.pjrt.jit_call~} operations can still reference the payload during partial lowering. Lowering an existing bytecode literal does not require an OpenXLA-enabled build; preparing IFRT kernels does.}
+
+\p{Prepared \code{\verb~|reussir.pjrt.jit_call~} operations lower to cached compilation, executable-device validation, and synchronous execution through the PJRT runtime. Execution borrows the input buffers without donation and waits for every device before returning owned output handles. Each output must be adopted exactly once with \code{\verb~|reussir.array.from_ifrt~}. Arrays must use all call devices in the same order; donation and input/output aliases are rejected. The runtime validates executable placement before accessing array descriptors.}
+
+\p{\code{\verb~|ifrt.After~} becomes \code{\verb~|reussir.pjrt.after~}, which waits for each input shard to materialize. Completion handles lower to already-ready values because the runtime calls finish synchronously; the side-effecting calls preserve execution order. This does not provide asynchronous IFRT execution or automatic donation.}
+
+\p{The native compiler registers IFRT/StableHLO and automatically prepares device kernels before host inlining and optimization, including at \code{\verb~|-O none~}. Compile an outlined MLIR host program with \code{\verb~|rrc input.mlir --emit llvm-ir -o output.ll~} or emit a native object for linking. Compilation embeds the kernel bytecode; it does not require a PJRT runtime or load a backend plugin. The tensor kernels remain MLIR input: this does not add tensor computation syntax to \code{\verb~|.rr~} sources.}
+
+\p{\code{\verb~|--reussir-prepare-pjrt~} packages kernels, removes obsolete source modules, and strips IFRT function annotations even from hosts without calls. It leaves ordinary modules unchanged; builds without OpenXLA reject IFRT programs when preparation is required. For a hand-written \code{\verb~|reussir-opt~} pipeline, schedule this pass before host optimization and the normal array, RC, control-flow, and LLVM lowerings. The \code{\verb~|pjrt_call_e2e.mlir~} and \code{\verb~|pjrt_sharded_e2e.mlir~} integration tests show native-compiler and explicit lowering/linking commands. Execution requires a PJRT-enabled runtime and \code{\verb~|REUSSIR_PJRT_PLUGIN~} pointing to a compatible backend plugin; registering the compiler dialects alone does not provide a device backend.}
+
+\p{The individually registered passes cover donation/sharding verification, control dependencies, duplicate callees, copy/reshard preparation, outlining, attribute removal, and IFRT/VIFRT version conversions. The atom-compilation pass requires a runtime compiler and is not registered by this integration.}
+
+\p{See the upstream \<html:a>[href]{\verb~|https://github.com/openxla/xla/blob/fc840b37e26bd36c99f32e295324a1700dc12ecd/xla/python/ifrt/ir/ifrt_ir_program_serdes.cc~}{serializer} and \<html:a>[href]{\verb~|https://github.com/openxla/xla/blob/fc840b37e26bd36c99f32e295324a1700dc12ecd/xla/python/ifrt/ir/ifrt_ir_program.proto~}{program schema}.}
+}
+
+\subtree[design-ifrt-build-build-adapter]{
+\title{Build adapter}
+
+\p{\code{\verb~|ReussirIfrt~} contains upstream IFRT support objects. These require XLA support libraries (including the HLO layout parser and MHLO), but do not provide a CPU/GPU execution backend. MHLO remains an implementation dependency and is not registered as a public dialect or pass family in \code{\verb~|reussir-opt~}.}
+
+\p{\code{\verb~|build.py~} stages sources in the build directory without modifying source checkouts. Its overlays are limited to build integration and compatibility:}
+
+\ul{
+\li{LLVM/MLIR and StableHLO Bazel repositories expose CMake's headers and TableGen. The host TableGen helper and final tools link the installed LLVM/MLIR.}
+\li{VIFRT-to-IFRT declares its Func dialect dependency for VIFRT-only input.}
+\li{Where MLIR lacks \code{\verb~|SymbolName~}/\code{\verb~|SymbolVisibility~}, IFRT and pinned Shardy use the equivalent \code{\verb~|Symbol~} interface and visibility helper.}
+\li{The translation driver uses upstream serialization, with its entry point renamed and SDY registered to parse outlined modules containing meshes. Only the serializer registration archive needs CMake's \code{\verb~|WHOLE_ARCHIVE~}.}
+}
+
+\p{The MLIR Bazel TableGen rule is pinned to LLVM revision \code{\verb~|e56c2cefc3e7978de4a2d799fa3abec77d75af21~} and SHA-256 checked. XLA support code uses C++20 with the same compiler and standard-library ABI as Reussir because this XLA revision has an invalid \code{\verb~|std::to_underlying~} alias in its C++23 path. Reussir continues to use C++23. Keep pins and overlays together when updating.}
+}
+
+\subtree[design-ifrt-build-host-transfers-for-sharded-arrays]{
+\title{Host transfers for sharded arrays}
+
+\p{\code{\verb~|reussir.array.to_device~} distributes a global strided host memref across the array's ordered devices. \code{\verb~|reussir.array.to_host~} gathers shards into a dense row-major host memref. Both operations support concrete IFRT \code{\verb~|sharding_param~} metadata, including uneven multidimensional tiles, mesh/device permutations, replication, dynamic extents, empty arrays, and dimensions smaller than their shard count. Uploads preserve signed host strides and view offsets; downloads preserve the destination view offset.}
+
+\p{Shard placement follows upstream IFRT's \<html:a>[href]{\verb~|https://github.com/openxla/xla/blob/fc840b37e26bd36c99f32e295324a1700dc12ecd/xla/python/ifrt/ir/sharding_param.h~}{\code{\verb~|ShardingParam~}} device permutation. Physical shapes and edge domains follow XLA's \<html:a>[href]{\verb~|https://github.com/openxla/xla/blob/fc840b37e26bd36c99f32e295324a1700dc12ecd/xla/hlo/ir/hlo_sharding.cc~}{\code{\verb~|HloSharding::TileShape~}, \code{\verb~|TileOffsetForDevice~}, and \code{\verb~|TileLimitForDevice~}}: each physical dimension is \code{\verb~|ceil(global_extent / shard_count)~}, while the valid logical domain is clipped to the global array. This matches SPMD execution; IFRT's higher-level \code{\verb~|ShardingParamShardingSpec::GetShardShape~} still rejects uneven shapes at this upstream revision and is not used for physical sizing. Device allocation and transfers use the same ceiling-sized physical tiles.}
+
+\p{Uploads zero-fill edge padding and initialize every replica. Downloads select one representative per tile, assuming replicas contain identical values, and copy only valid logical rows from temporary row-major shard storage. Entirely padded devices never access or advance pointers into host storage. Plugins need not implement strided host downloads. Transfers finish borrowing host storage before returning, and downloads can initialize newly allocated host arrays.}
+
+\p{Unspecified multi-device sharding does not identify which host values belong to which devices, so transfers require concrete topology. Unreduced axes describe partial values rather than replicas; \code{\verb~|sharding_param~} records the axes but not the reduction operator. Upstream Shardy supports distinct \<html:a>[href]{\verb~|https://github.com/openxla/xla/blob/fc840b37e26bd36c99f32e295324a1700dc12ecd/xla/service/spmd/shardy/test/sdy_round_trip_export_pipeline.mlir~}{SUM, MAX, and MIN unreduced semantics}. Materialize those reductions explicitly before downloading, or upload into a reduced array before converting to a partial representation. Transfers diagnose missing reduction semantics rather than discard partial values or assume SUM. Sharding metadata requires an OpenXLA-enabled compiler; single-device transfers without sharding metadata remain available without OpenXLA.}
+}

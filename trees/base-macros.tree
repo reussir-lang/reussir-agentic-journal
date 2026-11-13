@@ -1,0 +1,14 @@
+\title{Basic macros}
+
+\p{Shared macros. Every tree that uses a table or a pull-request link imports this tree with \code{\verb~|\import{base-macros}~}.}
+
+\xmlns:html{http://www.w3.org/1999/xhtml}
+
+\def\table[body]{\<html:table>{\body}}
+\def\tr[body]{\<html:tr>{\body}}
+\def\td[body]{\<html:td>{\body}}
+\def\th[body]{\<html:th>{\body}}
+
+\def\pr[n]{\<html:a>[href]{https://github.com/reussir-lang/reussir/pull/\n}{\verb~|#~\n}}
+\def\issue[n]{\<html:a>[href]{https://github.com/reussir-lang/reussir/issues/\n}{\verb~|#~\n}}
+\def\src[path]{\<html:a>[href]{https://github.com/reussir-lang/reussir/blob/main/\path}{\code{\path}}}

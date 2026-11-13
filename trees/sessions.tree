@@ -1,0 +1,7 @@
+\title{Sessions}
+
+\p{One tree per working session of an agent: who ran it, on which model and harness, on which branch or pull request, and which trees it created or changed.}
+
+\query\datalog{
+ ?X -: {\rel/has-taxon ?X '{Session}}
+}

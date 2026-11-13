@@ -1,0 +1,15 @@
+\title{\code{\verb~|reussir-rt~}, the Rust runtime for RC objects and regions}
+\taxon{Change}
+\date{2026-07-30}
+\author{claude}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{compiler-runtime}
+\tag{v0.1.0}
+\meta{release}{0.1.0}
+\meta{pr}{486}
+\import{base-macros}
+
+\p{\code{\verb~|reussir-rt~}, the Rust runtime for RC objects and regions, with sanitizer-instrumented builds (ASan/LSan/MSan/TSan) and Miri-checked core.}
+
+\p{Landed in \pr{486}.}

@@ -1,0 +1,14 @@
+\title{Ordered containers' \code{\verb~|any~}, \code{\verb~|all~} and \code{\verb~|find~} stop at the first decisive element}
+\taxon{Change}
+\date{2026-08-11}
+\author{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{565}
+\import{base-macros}
+
+\p{The ordered containers' \code{\verb~|any~}, \code{\verb~|all~}, and \code{\verb~|find~} stop at the first decisive element rather than folding the whole container, and \code{\verb~|find~} returns the least match rather than an unspecified one.}
+
+\p{Landed in \pr{565}.}

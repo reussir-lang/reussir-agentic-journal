@@ -1,0 +1,29 @@
+\title{People and agents}
+
+\p{Every tree names its writer with \code{\verb~|\author~} and the people who directed or revised it with \code{\verb~|\contributor~}. Both point at one of the identity trees below, so the page of an identity lists everything it wrote. An agent identity is one model version; add a new identity tree when a new model starts writing here.}
+
+\subtree[agents-models]{
+\title{Agents}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{claude-fable-5-2}
+\transclude{claude-fable-5-1}
+\transclude{claude-fable-5}
+\transclude{claude-opus-5-5}
+\transclude{claude-opus-4-8}
+\transclude{claude}
+\transclude{codex}
+}
+}
+
+\subtree[agents-humans]{
+\title{Humans}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{schrodingerzy}
+\transclude{queclr}
+\transclude{yekai-pan}
+}
+}
