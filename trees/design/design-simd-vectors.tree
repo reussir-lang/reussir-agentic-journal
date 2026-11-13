@@ -82,7 +82,7 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \li{A lane that is masked off in a lanewise operation keeps the lane of the first operand. In a comparison it is false. In a reduction it does not contribute. Zeroing instead of merging is \code{\verb~|select(m, op(a, b), splat(0))~}.}
 \li{A masked lane never traps and never touches memory. Integer division and remainder replace the divisor of masked lanes by one before dividing.}
 \li{Lowering does not use \code{\verb~|vector.mask~}: upstream lowers that region for a few operations only. A pure lanewise operation becomes the operation followed by \code{\verb~|arith.select~}; a reduction selects the identity of its kind first; memory operations use the masked LLVM intrinsics. Instruction selection turns the select into merging predication where the target has it: a select followed by a reduction compiles to \code{\verb~|sel~} and \code{\verb~|fadda~} on SVE and to \code{\verb~|vmerge~} and \code{\verb~|vfredosum~} on RVV.}
-\li{Masks are built by comparisons, by \code{\verb~|mask_first<M>(n)~}, whose first \code{\verb~|n~} lanes are set (\code{\verb~|vector.create_mask~}), and by \code{\verb~|mask_const<M>(n)~} (\code{\verb~|vector.constant_mask~}). They combine with \code{\verb~|and~}, \code{\verb~|or~}, \code{\verb~|xor~} and \code{\verb~|not~}.}
+\li{Masks are built by comparisons and by \code{\verb~|mask_first<M>(n...)~}, whose leading \code{\verb~|n~} lanes are set (\code{\verb~|vector.create_mask~}; \code{\verb~|whilelt~} on SVE). They combine with \code{\verb~|and~}, \code{\verb~|or~}, \code{\verb~|xor~} and \code{\verb~|not~}, and with the operators \code{\verb~|& | ^ !~}. In HIR and MIR the mask of an operation is simply its last operand.}
 }
 }
 
@@ -97,7 +97,7 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \tr{\td{\code{\verb~|from_elements<V>(x...)~}}\td{One argument per lane; fixed only}\td{\code{\verb~|vector.from_elements~}}}
 \tr{\td{\code{\verb~|step<V>()~}}\td{Lanes 0, 1, 2, ...; one dimension}\td{\code{\verb~|vector.step~}}}
 \tr{\td{\code{\verb~|lanes<V>()~}}\td{Number of lanes as \code{\verb~|u64~}}\td{constant, or \code{\verb~|vector.vscale~} times a constant}}
-\tr{\td{\code{\verb~|extract(v, i...)~}}\td{A lane, or a sub-vector when fewer indices than dimensions are given}\td{\code{\verb~|vector.extract~}}}
+\tr{\td{\code{\verb~|extract(v, i...)~}}\td{A lane, or a sub-vector when fewer indices than dimensions are given. Only the index into the last dimension may be computed; the others are literals}\td{\code{\verb~|vector.extract~}}}
 \tr{\td{\code{\verb~|insert(v, x, i...)~}}\td{\code{\verb~|v~} with a lane or sub-vector replaced}\td{\code{\verb~|vector.insert~}}}
 \tr{\td{\code{\verb~|from_array(a)~}, \code{\verb~|to_array(v)~}}\td{Between a fixed vector and an array of the same shape}\td{\code{\verb~|vector.from_elements~}, \code{\verb~|vector.to_elements~}}}
 \tr{\td{\code{\verb~|add sub mul div rem neg~}}\td{Lanewise arithmetic; signedness from the element type}\td{\code{\verb~|arith~}}}
@@ -106,14 +106,11 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \tr{\td{\code{\verb~|fma(a, b, c)~} and the \code{\verb~|core::intrinsic::math~} functions}\td{Lanewise on floating-point vectors}\td{\code{\verb~|math~}}}
 \tr{\td{\code{\verb~|eq ne lt le gt ge~}}\td{Lanewise comparison; the result is a mask}\td{\code{\verb~|arith.cmpi~}, \code{\verb~|arith.cmpf~}}}
 \tr{\td{\code{\verb~|select(m, a, b)~}}\td{\code{\verb~|a~} where the mask is set, else \code{\verb~|b~}}\td{\code{\verb~|arith.select~}}}
-\tr{\td{\code{\verb~|mask_first<M>(n)~}}\td{The first \code{\verb~|n~} lanes are set}\td{\code{\verb~|vector.create_mask~}}}
-\tr{\td{\code{\verb~|mask_const<M>(n...)~}}\td{The same with a constant sequence, one count per dimension}\td{\code{\verb~|vector.constant_mask~}}}
+\tr{\td{\code{\verb~|mask_first<M>(n...)~}}\td{The leading \code{\verb~|n~} lanes are set, one count per dimension; constant counts fold to \code{\verb~|vector.constant_mask~}}\td{\code{\verb~|vector.create_mask~}}}
 \tr{\td{\code{\verb~|any(m)~}, \code{\verb~|all(m)~}}\td{Whether some or every lane is set}\td{\code{\verb~|vector.reduction~} with \code{\verb~|or~}, \code{\verb~|and~}}}
 \tr{\td{\code{\verb~|count(m)~}}\td{Number of set lanes}\td{extend, then \code{\verb~|vector.reduction~} with \code{\verb~|add~}}}
 \tr{\td{\code{\verb~|first_set(m)~}}\td{Index of the first set lane, or \code{\verb~|lanes~} if none; one dimension}\td{\code{\verb~|vector.step~}, \code{\verb~|arith.select~}, \code{\verb~|vector.reduction~} with \code{\verb~|minui~}}}
 \tr{\td{\code{\verb~|reduce_add reduce_mul reduce_min reduce_max reduce_and reduce_or reduce_xor~}}\td{All lanes combined into a scalar}\td{\code{\verb~|vector.reduction~}}}
-\tr{\td{\code{\verb~|reduce_dims_<kind>(v, d)~}}\td{The dimensions in the constant sequence \code{\verb~|d~} combined away}\td{\code{\verb~|vector.multi_reduction~}}}
-\tr{\td{\code{\verb~|scan_<kind>(v, init, d, inclusive)~}}\td{Running combination along dimension \code{\verb~|d~}; returns the vector and the last value}\td{\code{\verb~|vector.scan~}}}
 \tr{\td{\code{\verb~|outer(a, b)~}}\td{Outer product of two 1-D vectors, optionally added to a third}\td{\code{\verb~|vector.outerproduct~}}}
 \tr{\td{\code{\verb~|shape_cast<V>(v)~}}\td{The same lanes in another shape}\td{\code{\verb~|vector.shape_cast~}}}
 \tr{\td{\code{\verb~|bitcast<V>(v)~}}\td{The same bits as other element types}\td{\code{\verb~|vector.bitcast~}}}
@@ -125,7 +122,7 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \tr{\td{\code{\verb~|print(v)~}}\td{Print the lanes; for tests}\td{\code{\verb~|vector.print~}}}
 }
 \ul{
-\li{Floating-point \code{\verb~|reduce_add~} and \code{\verb~|reduce_mul~} combine in lane order by default. A constant flag allows reassociation, which is what makes the reduction fast; it is the fast-math flag of \code{\verb~|vector.reduction~}.}
+\li{Floating-point \code{\verb~|reduce_add~} and \code{\verb~|reduce_mul~} combine in lane order. \code{\verb~|reduce_add_reassoc~} and \code{\verb~|reduce_mul_reassoc~} allow any order, which is what lets a target reduce in parallel; they set the \code{\verb~|reassoc~} fast-math flag of \code{\verb~|vector.reduction~}.}
 \li{\code{\verb~|reduce_min~} and \code{\verb~|reduce_max~} on floating-point use the \code{\verb~|minnumf~} and \code{\verb~|maxnumf~} kinds, which ignore a NaN lane, as the scalar \code{\verb~|min~} and \code{\verb~|max~} of \code{\verb~|core::intrinsic::math~} do.}
 \li{The operators \code{\verb~|+ - * / % & | ^ << >>~} and the unary \code{\verb~|-~} and \code{\verb~|!~} work lane by lane on vectors, and \code{\verb~|& | ^ !~} on masks. They have no masked form; the functions do. The comparison operators stay scalar, because they must yield a \code{\verb~|bool~}; lanes are compared with \code{\verb~|eq~}, \code{\verb~|lt~} and the others, which yield a mask.}
 }
@@ -164,9 +161,10 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \tr{\td{\code{\verb~|extract_strided_slice~}, \code{\verb~|insert_strided_slice~}}\td{\code{\verb~|slice~}, \code{\verb~|insert_slice~}}}
 \tr{\td{\code{\verb~|scalable.extract~}, \code{\verb~|scalable.insert~}}\td{\code{\verb~|scalable_extract~}, \code{\verb~|scalable_insert~}}}
 \tr{\td{\code{\verb~|shape_cast~}, \code{\verb~|bitcast~}, \code{\verb~|transpose~}}\td{the same names}}
-\tr{\td{\code{\verb~|create_mask~}, \code{\verb~|constant_mask~}}\td{\code{\verb~|mask_first~}, \code{\verb~|mask_const~}}}
+\tr{\td{\code{\verb~|create_mask~}, \code{\verb~|constant_mask~}}\td{\code{\verb~|mask_first~}; constant counts fold to the second}}
 \tr{\td{\code{\verb~|mask~}, \code{\verb~|yield~}}\td{the optional mask argument of every operation}}
-\tr{\td{\code{\verb~|reduction~}, \code{\verb~|multi_reduction~}, \code{\verb~|scan~}}\td{\code{\verb~|reduce_<kind>~}, \code{\verb~|reduce_dims_<kind>~}, \code{\verb~|scan_<kind>~}}}
+\tr{\td{\code{\verb~|reduction~}}\td{\code{\verb~|reduce_<kind>~}}}
+\tr{\td{\code{\verb~|multi_reduction~}, \code{\verb~|scan~}}\td{deferred; see [prob-C421](prob-C421)}}
 \tr{\td{\code{\verb~|outerproduct~}}\td{\code{\verb~|outer~}}}
 \tr{\td{\code{\verb~|maskedload~}, \code{\verb~|maskedstore~}, \code{\verb~|gather~}, \code{\verb~|scatter~}, \code{\verb~|expandload~}, \code{\verb~|compressstore~}}\td{\code{\verb~|load~}, \code{\verb~|store~}, \code{\verb~|gather~}, \code{\verb~|scatter~}, \code{\verb~|load_expand~}, \code{\verb~|store_compress~} of \code{\verb~|core::simd~}, over pointers}}
 \tr{\td{\code{\verb~|load~}, \code{\verb~|store~}}\td{\code{\verb~|ptr::load~}, \code{\verb~|ptr::store~} with a vector type}}
@@ -209,12 +207,15 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 }
 \transclude{prob-Y593}
 \transclude{prob-I2N9}
+\transclude{prob-C421}
 }
 
 \subtree[design-simd-vectors-plan]{
 \title{Patch plan}
 
 \p{A stack of pull requests of about 300 changed lines each, tests included. Each one is usable on its own and leaves the textual IR round trip complete.}
+
+\p{\strong{Progress.} Patches 1 to 8 are open as drafts: \pr{994}, \pr{995}, \pr{996}, \pr{997}, \pr{998}, \pr{999}, \pr{1000} and \pr{1001}.}
 \table{
 \tr{\th{#}\th{Title}\th{Contents}}
 \tr{\td{1}\td{\code{\verb~|[conversion]~} the \code{\verb~|vector~} dialect lowers through the pipeline}\td{Its conversion in \code{\verb~|reussir-convert-to-llvm~} and \code{\verb~|convert-to-llvm~}, with the SVE options on AArch64; lit tests for fixed, n-D and trailing-scalable shapes.}}
@@ -223,8 +224,8 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \tr{\td{4}\td{\code{\verb~|[core]~} construction and lane access}\td{The \code{\verb~|core::simd~} intrinsic family; \code{\verb~|splat~}, \code{\verb~|step~}, \code{\verb~|lanes~}, \code{\verb~|from_elements~}, \code{\verb~|extract~}, \code{\verb~|insert~}.}}
 \tr{\td{5}\td{\code{\verb~|[core]~} lanewise arithmetic, comparison, \code{\verb~|select~}}\td{Unmasked functions.}}
 \tr{\td{6}\td{\code{\verb~|[core]~} operators on vectors}\td{\code{\verb~|+ - * / % & | ^ << >>~}, unary \code{\verb~|-~} and \code{\verb~|!~}.}}
-\tr{\td{7}\td{\code{\verb~|[core]~} masks and predication}\td{\code{\verb~|mask_first~}, \code{\verb~|mask_const~}, \code{\verb~|any~}, \code{\verb~|all~}, \code{\verb~|count~}, \code{\verb~|first_set~}; the optional mask argument and its lowering.}}
-\tr{\td{8}\td{\code{\verb~|[core]~} reductions and scans}\td{\code{\verb~|reduce_<kind>~}, \code{\verb~|reduce_dims_<kind>~}, \code{\verb~|scan_<kind>~}, the reassociation flag.}}
+\tr{\td{7}\td{\code{\verb~|[core]~} masks and predication}\td{\code{\verb~|mask_first~}, \code{\verb~|any~}, \code{\verb~|all~}, \code{\verb~|count~}, \code{\verb~|first_set~}; the optional mask argument and its lowering.}}
+\tr{\td{8}\td{\code{\verb~|[core]~} reductions}\td{\code{\verb~|reduce_<kind>~} and the reassociated sum and product.}}
 \tr{\td{9}\td{\code{\verb~|[core]~} vectors through pointers}\td{A vector as the accessed type of \code{\verb~|ptr::load~}, \code{\verb~|store~}, \code{\verb~|type_offset~}, \code{\verb~|advance~}; masks in memory.}}
 \tr{\td{10}\td{\code{\verb~|[conversion]~} \code{\verb~|[core]~} masked load and store}\td{Conversion of \code{\verb~|ptr.masked_load~} and \code{\verb~|ptr.masked_store~}; \code{\verb~|simd::load~}, \code{\verb~|simd::store~}.}}
 \tr{\td{11}\td{\code{\verb~|[conversion]~} \code{\verb~|[core]~} gather, scatter, expand, compress}\td{Conversion of \code{\verb~|ptr.gather~} and \code{\verb~|ptr.scatter~}; the two Reussir operations; the four functions.}}

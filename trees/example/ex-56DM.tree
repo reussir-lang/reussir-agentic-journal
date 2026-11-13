@@ -42,7 +42,7 @@ pub fn matmul(a: Simd<[f32; 4, 4]>, b: Simd<[f32; 4, 4]>) -> Simd<[f32; 4, 4]> {
 }
 ~}
 \ul{
-\li{\code{\verb~|scan_add(x, carry, 0, true)~} starts from \code{\verb~|carry~} and includes each lane in its own sum. In the last chunk the masked lanes were loaded as zero, so \code{\verb~|last~} is still the total.}
+\li{\code{\verb~|scan~} is not available yet, see [prob-C421](prob-C421). \code{\verb~|scan_add(x, carry, 0, true)~} starts from \code{\verb~|carry~} and includes each lane in its own sum. In the last chunk the masked lanes were loaded as zero, so \code{\verb~|last~} is still the total.}
 \li{The matrix product adds four outer products. \code{\verb~|vector.contract~} would say it in one operation; it waits for affine maps in the language, see [prob-Y593](prob-Y593).}
 \li{A fixed two-dimensional vector such as \code{\verb~|Simd<[f32; 4, 4]>~} can be a record field, so a transform can be stored and passed around like any value.}
 }
