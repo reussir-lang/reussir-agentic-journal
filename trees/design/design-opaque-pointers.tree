@@ -12,7 +12,7 @@
 \import{base-macros}
 
 \p{\strong{Status:} implemented.}
-\p{Reussir has raw pointers for code that talks to memory the language does not manage: foreign buffers, device registers, and the storage behind its own containers. They are opaque, as LLVM pointers are: a pointer names an address space and nothing else, and each access says which type it reads or writes. Implemented by \pr{986}, \pr{987}, \pr{989} and \pr{990}; the data pointers of the containers are in \pr{992}.}
+\p{Reussir has raw pointers for code that talks to memory the language does not manage: foreign buffers, device registers, and the storage behind its own containers. They are opaque, as LLVM pointers are: a pointer names an address space and nothing else, and each access says which type it reads or writes. Implemented by \pr{986}, \pr{987}, \pr{989}, \pr{990} and \pr{992} for the data pointers of the containers.}
 \subtree[design-opaque-pointers-types]{
 \title{Types}
 

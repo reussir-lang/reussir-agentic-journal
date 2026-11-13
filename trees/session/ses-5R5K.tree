@@ -12,11 +12,11 @@
 \p{Added opaque pointers to Reussir in a stack of pull requests, reviewed the result with three independent reviewers, fixed what they found, and extended the operation set.}
 \ul{
 \li{\strong{Merged.} \pr{986} brings the \code{\verb~|ptr~} dialect into the pipeline, \pr{987} adds the types, \pr{989} the operations, \pr{990} provenance, const casts, arithmetic flags and invariant groups. \pr{988} builds the \code{\verb~|rcgmp~} integer type through a C API constructor instead of parsing its text.}
-\li{\strong{Open.} \pr{992}, a draft, adds \code{\verb~|unsafe_data_ptr~} to \code{\verb~|str~}, arrays, \code{\verb~|String~}, \code{\verb~|Vec~}, \code{\verb~|Text~} and \code{\verb~|TextView~}.}
+\li{\strong{Also merged.} \pr{992} adds \code{\verb~|unsafe_data_ptr~} to \code{\verb~|str~}, arrays, \code{\verb~|String~}, \code{\verb~|Vec~}, \code{\verb~|Text~} and \code{\verb~|TextView~}.}
 \li{\strong{Design note.} [Opaque pointers](design-opaque-pointers).}
 \li{\strong{Decisions recorded.} [dec-RITS](dec-RITS) and [dec-3TIP](dec-3TIP).}
 \li{\strong{Problems opened.} [prob-UUNE](prob-UUNE), [prob-S0EB](prob-S0EB) and [prob-6EBA](prob-6EBA).}
-\li{\strong{Changelog.} [log-03ZZ](log-03ZZ), [log-ETSR](log-ETSR), [log-Z1QT](log-Z1QT) and [log-T5E8](log-T5E8).}
+\li{\strong{Changelog.} [log-03ZZ](log-03ZZ), [log-ETSR](log-ETSR), [log-Z1QT](log-Z1QT), [log-T5E8](log-T5E8) and [log-SZER](log-SZER).}
 \li{\strong{Insights.} [ins-O5TC](ins-O5TC) and [ins-TCUR](ins-TCUR).}
 \li{\strong{Policy recorded.} Direct pushes to the journal, in [standing policies](standing-policies).}
 }

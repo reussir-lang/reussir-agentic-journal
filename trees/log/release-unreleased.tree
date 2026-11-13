@@ -24,6 +24,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-SZER}
 \transclude{log-NU6X}
 \transclude{log-XE8L}
 \transclude{log-YIV0}

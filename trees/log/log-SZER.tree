@@ -1,0 +1,13 @@
+\title{Data pointers of strings, arrays and vectors}
+\taxon{Change}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{992}
+\import{base-macros}
+
+\p{\code{\verb~|unsafe_data_ptr~} returns a \code{\verb~|ConstPtr<core::ptr::Generic>~} to the first byte or element: \code{\verb~|core::intrinsic::str::unsafe_data_ptr~} and \code{\verb~|core::intrinsic::array::unsafe_data_ptr~} for the builtin types, and a member of \code{\verb~|String~}, \code{\verb~|Vec~}, \code{\verb~|Text~} and \code{\verb~|TextView~}. The pointer keeps nothing alive. See [data pointers](design-opaque-pointers-data-pointers). \pr{992}.}
