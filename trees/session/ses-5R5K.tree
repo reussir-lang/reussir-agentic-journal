@@ -20,7 +20,7 @@
 \li{\strong{Insights.} [ins-O5TC](ins-O5TC) and [ins-TCUR](ins-TCUR).}
 \li{\strong{Policy recorded.} Direct pushes to the journal, in [standing policies](standing-policies).}
 }
-\p{\strong{Design drafted.} [SIMD vectors](design-simd-vectors): a multi-dimensional, optionally scalable vector type with predicated operations, its memory operations over pointers, five worked examples and a plan of fourteen patches. Nothing of it is implemented.}
+\p{\strong{Design drafted.} [SIMD vectors](design-simd-vectors): a multi-dimensional, optionally scalable vector type with predicated operations, its memory operations over pointers, five worked examples and a plan of fourteen patches. The design was accepted after discussion: the scalable extent is the last one, memory operations come from the upstream \code{ptr} dialect, operators work on vectors, constant lists are \code{ConstSeq} arguments, and \code{contract} waits for affine maps, see [prob-Y593](prob-Y593).}
 
 \p{The review found that the first operation set could not rebuild a usable pointer from an address, that addresses were taken at the pointer size where the index width is required, that alignments above 2^31 were accepted and then dropped, that \code{\verb~|bool~} was accessed as a single bit, and that a record named after a builtin type did not survive a round trip through MIR text. All were fixed before the merges.}
 \p{\strong{Regression and fix.} The sigil change of \pr{987} broke the Ubuntu builds on the main branch: an OpenXLA-only test writes MIR by hand in the old spelling, and the local build has no OpenXLA, so the test never ran before the merge. \pr{993} fixes the two affected tests.}

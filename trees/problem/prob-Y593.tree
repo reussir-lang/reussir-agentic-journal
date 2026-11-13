@@ -1,0 +1,15 @@
+\title{Affine maps in the language, for \code{\verb~|vector.contract~}}
+\taxon{Problem}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\tag{simd}
+\meta{status}{open}
+\meta{created}{2026-11-13}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\code{\verb~|vector.contract~} generalizes dot products, matrix products and their relatives. It is described by one affine map per operand and one iterator type per index, which the surface language has no way to write. [SIMD vectors](design-simd-vectors) therefore leaves it out.}
+\p{\strong{Direction.} Add affine expressions and affine maps to the language with their own syntax, as an extension made after the main SIMD stack, and give \code{\verb~|contract~} a map argument. Reading a closure literal as a specification was considered and set aside: a vector is a first-class value and its operations take values, not kernels.}
+\p{\strong{What would close this.} A design for affine maps as constant values, and \code{\verb~|simd::contract~} on top of it. Until then a matrix product is a sum of outer products, as in [the example](ex-56DM).}
