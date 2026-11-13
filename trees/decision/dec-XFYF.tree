@@ -1,0 +1,16 @@
+\title{A target without scalable vectors takes a scale of one}
+\taxon{Decision}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{compiler}
+\tag{simd}
+\meta{status}{accepted}
+\meta{created}{2026-11-13}
+\meta{completed}{2026-11-13}
+\import{base-macros}
+
+\p{\strong{Status:} accepted.}
+\p{\strong{Context.} LLVM compiles a scalable vector only for a target that has them: AArch64 with SVE and RISC-V with the vector extension. The x86-64 backend and the AArch64 backend without SVE abort with \code{\verb~|Don't know how to legalize this scalable vector type~}; there is no fallback to a fixed vector. Checked with \code{\verb~|llc~} on LLVM 23.1. The first implementation therefore rejected a program that used a scalable vector on such a target, \pr{996}, which made scalable source unusable on most machines.}
+\p{\strong{Decision.} The scale of a scalable vector is any positive constant of the machine, so a target without scalable vectors takes one. The pass \code{\verb~|reussir-fix-vector-scale~} runs before the lowering to LLVM on such a target: every scalable vector type becomes the fixed type of the same extents, \code{\verb~|vector.vscale~} becomes 1, and the operations that exist only for scalable vectors become their fixed counterparts. \pr{1008}.}
+\p{\strong{Consequences.} One source runs everywhere; \code{\verb~|Simd<[u8; [16]]>~} is 16 lanes on x86-64 and NEON. The frontend, the language rules and the MIR stay independent of the target: a scalable vector is still only a parameter, a result or a local. The examples written with scalable vectors can be executed on the development machine. A wider fixed vector is not chosen automatically; a program that wants 32 or 64 lanes on AVX names a fixed type.}

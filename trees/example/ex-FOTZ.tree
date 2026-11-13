@@ -39,4 +39,4 @@ pub fn find(s: String, needle: u8) -> u64 {
 \li{The comparison takes the mask too, so the padding lanes of the last chunk cannot match.}
 \li{\code{\verb~|unsafe_inc~} and \code{\verb~|unsafe_dec~} bracket the region where the buffer is reachable only through \code{\verb~|base~}. Without them the string may be released after \code{\verb~|s.unsafe_data_ptr()~}, its last ordinary use.}
 }
-\p{Belongs to [SIMD vectors](design-simd-vectors). A fixed-vector form of it runs in the standard library tests, \pr{1006}; the scalable form shown here compiles and has not been executed.}
+\p{Belongs to [SIMD vectors](design-simd-vectors). A fixed-vector form of it runs in the standard library tests, \pr{1006}; the scalable form shown here compiles for SVE and RVV, and runs with a scale of one elsewhere.}

@@ -45,4 +45,4 @@ fn clamp_copy(a: [f32; ?], limit: f32, i: i64) -> [f32; ?] {
 \li{The store is masked by the comparison, so only the elements above the limit are written. No blend is needed.}
 \li{\code{\verb~|as_mut~} is where the program takes responsibility for writing through a pointer that was handed out read-only.}
 }
-\p{Belongs to [SIMD vectors](design-simd-vectors). A fixed-vector form of it runs in the standard library tests, \pr{1006}; the scalable form shown here compiles and has not been executed.}
+\p{Belongs to [SIMD vectors](design-simd-vectors). A fixed-vector form of it runs in the standard library tests, \pr{1006}; the scalable form shown here compiles for SVE and RVV, and runs with a scale of one elsewhere.}

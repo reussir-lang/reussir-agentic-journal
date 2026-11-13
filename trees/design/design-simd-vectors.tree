@@ -69,7 +69,7 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 }
 \p{The rule is checked where a type is written and, for inferred types, when a function is instantiated. A scalable vector is read from and written to memory by the operations themselves; what is forbidden is a value whose layout contains one, and a tuple is such a value.}
 
-\p{\strong{Target check.} A program that uses a scalable vector is rejected when the target has neither AArch64 SVE nor the RISC-V vector extension. The driver checks once, after monomorphization, and reports the first use with its source location. A fixed vector is accepted on every target.}
+\p{\strong{Targets without scalable vectors.} LLVM compiles a scalable vector only for AArch64 with SVE and RISC-V with the vector extension. On any other target the compiler takes a scale of one and lowers a scalable vector as the fixed vector of the same extents, so the same source runs everywhere. See [dec-XFYF](dec-XFYF).}
 }
 
 }
@@ -178,7 +178,7 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \ul{
 \li{The \code{\verb~|vector~} dialect is converted to the LLVM dialect inside \code{\verb~|reussir-convert-to-llvm~} and \code{\verb~|convert-to-llvm~}, as the \code{\verb~|ptr~} dialect is.}
 \li{When the target is AArch64 with SVE, the conversion runs with \code{\verb~|enable-arm-sve~}, and \code{\verb~|arm-sve-legalize-vector-storage~} runs before it; that pass makes stored scalable masks and multi-dimensional scalable values legal.}
-\li{Other targets use the plain conversion. x86 and NEON have fixed vectors only; a scalable vector there is a compile error from the backend. RVV takes scalable vectors through generic LLVM.}
+\li{Other targets use the plain conversion. Where the target has no scalable vectors, \code{\verb~|reussir-fix-vector-scale~} first turns every scalable vector into a fixed one with a scale of one. RVV takes scalable vectors through generic LLVM.}
 }
 }
 
@@ -213,12 +213,12 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 
 \p{A stack of pull requests of about 300 changed lines each, tests included. Each one is usable on its own and leaves the textual IR round trip complete.}
 
-\p{\strong{Progress.} All patches are open as drafts, each on top of the one before: \pr{994}, \pr{995}, \pr{996}, \pr{997}, \pr{998}, \pr{999}, \pr{1000}, \pr{1001}, \pr{1002}, \pr{1003}, \pr{1004}, \pr{1005} and \pr{1006}. Patch 13 was dropped: \code{\verb~|from_array~} and \code{\verb~|to_array~} are a pointer load or store through \code{\verb~|array::unsafe_data_ptr~}, and \code{\verb~|vector.print~} lowers to calls into the MLIR runner utilities, which the Reussir runtime does not ship.}
+\p{\strong{Progress.} All patches are open as drafts, each on top of the one before: \pr{994}, \pr{995}, \pr{996}, \pr{997}, \pr{998}, \pr{999}, \pr{1000}, \pr{1001}, \pr{1002}, \pr{1003}, \pr{1004}, \pr{1005} and \pr{1006}. Patch 13 was dropped: \code{\verb~|from_array~} and \code{\verb~|to_array~} are a pointer load or store through \code{\verb~|array::unsafe_data_ptr~}, and \code{\verb~|vector.print~} lowers to calls into the MLIR runner utilities, which the Reussir runtime does not ship. \pr{1008} adds the scale-of-one fallback on top.}
 \table{
 \tr{\th{#}\th{Title}\th{Contents}}
 \tr{\td{1}\td{\code{\verb~|[conversion]~} the \code{\verb~|vector~} dialect lowers through the pipeline}\td{Its conversion in \code{\verb~|reussir-convert-to-llvm~} and \code{\verb~|convert-to-llvm~}, with the SVE options on AArch64; lit tests for fixed, n-D and trailing-scalable shapes.}}
 \tr{\td{2}\td{\code{\verb~|[core]~} the \code{\verb~|Simd~} type, fixed}\td{\code{\verb~|TyKind~}, element and extent rules, display, mangling, HIR and MIR text, MLIR type; a vector as parameter and result.}}
-\tr{\td{3}\td{\code{\verb~|[core]~} scalable extents}\td{The bracket syntax, the last-extent rule, the storage rule with its instantiation-time check, the target check.}}
+\tr{\td{3}\td{\code{\verb~|[core]~} scalable extents}\td{The bracket syntax, the last-extent rule, the storage rule with its instantiation-time check.}}
 \tr{\td{4}\td{\code{\verb~|[core]~} construction and lane access}\td{The \code{\verb~|core::simd~} intrinsic family; \code{\verb~|splat~}, \code{\verb~|step~}, \code{\verb~|lanes~}, \code{\verb~|from_elements~}, \code{\verb~|extract~}, \code{\verb~|insert~}.}}
 \tr{\td{5}\td{\code{\verb~|[core]~} lanewise arithmetic, comparison, \code{\verb~|select~}}\td{Unmasked functions.}}
 \tr{\td{6}\td{\code{\verb~|[core]~} operators on vectors}\td{\code{\verb~|+ - * / % & | ^ << >>~}, unary \code{\verb~|-~} and \code{\verb~|!~}.}}
