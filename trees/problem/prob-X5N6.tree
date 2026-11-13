@@ -1,0 +1,16 @@
+\title{A PJRT program can abort at exit after finishing its work}
+\taxon{Problem}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{runtime}
+\tag{pjrt}
+\tag{ci}
+\meta{status}{open}
+\meta{created}{2026-11-13}
+\import{base-macros}
+
+\p{\strong{Status:} open. Seen once; not reproduced.}
+\p{On the x86-64 CI run of \code{\verb~|main~} at \code{\verb~|bed8269f~}, the test \code{\verb~|frontend/kernel_runtime_donation.rr~} printed the expected line, and its \code{\verb~|FileCheck~} succeeded, but the program then ended with exit code 134: \code{\verb~|libc++abi: terminating due to uncaught exception of type std::__1::system_error: recursive_mutex lock failed: Invalid argument~}. The same test passed in the neighbouring runs, including the pull request run of the same change.}
+\p{\strong{What is known.} The exception comes from libc++, which the PJRT CPU plugin is built with; the Reussir runtime has no \code{\verb~|recursive_mutex~}. Locking fails with \code{\verb~|EINVAL~} when the mutex has already been destroyed, so plugin code ran after one of the plugin's static destructors. The runtime already orders its own shutdown around the plugin: \code{\verb~|close_cache~} in \code{\verb~|reussir-rt/src/pjrt/context.rs~} is registered with \code{\verb~|atexit~} once when the client is created and again after the first compilation, because the plugin registers destructors lazily. The abort suggests a destructor that is registered later still, or a plugin worker thread that is still running when the statics are destroyed.}
+\p{\strong{What would close this.} A reproduction with a stack trace of the throwing thread, on a build with OpenXLA, repeated until the abort appears. That tells whether the late caller is the shutdown thread of \code{\verb~|close_cache~} or a thread of the plugin, and so whether the fix is another registration point for the hook or a join of the plugin's workers before exit.}
