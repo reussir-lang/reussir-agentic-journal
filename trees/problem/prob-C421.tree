@@ -1,0 +1,16 @@
+\title{\code{\verb~|vector.scan~} and \code{\verb~|vector.multi_reduction~} do not lower through the pipeline}
+\taxon{Problem}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{compiler}
+\tag{mlir}
+\tag{simd}
+\meta{status}{open}
+\meta{created}{2026-11-13}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{The upstream \code{\verb~|convert-vector-to-llvm~} pass lowers most of the \code{\verb~|vector~} dialect step by step before converting it, but its list of lowerings has neither the one for \code{\verb~|vector.scan~} nor the one for \code{\verb~|vector.multi_reduction~}. Both operations are left in the module and translation fails. Checked on LLVM 23.1 while writing \pr{1001}.}
+\p{[SIMD vectors](design-simd-vectors) therefore has no \code{\verb~|scan_<kind>~} and no \code{\verb~|reduce_dims_<kind>~} yet. A reduction over all lanes works, also for several dimensions, because the vector is flattened with \code{\verb~|vector.shape_cast~} first.}
+\p{\strong{What would close this.} A small pass in the Reussir pipeline that applies the upstream scan and multi-reduction lowering patterns before the vector conversion, and the two families of functions on top. The scan lowering unrolls per lane, so it is for fixed vectors; its result is a pair, which a scalable vector could not be part of anyway.}
