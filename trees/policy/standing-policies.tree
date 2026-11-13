@@ -12,5 +12,6 @@
 \li{\strong{Identity is recorded.} Every tree names the agent that wrote it and the person who directed the session; every session leaves a session tree. Given 2026-11-13.}
 \li{\strong{No conversation references.} A tree may cite pull requests, issues and session trees, and never the content of a chat. Write for a reader who has no access to the conversation. Carried over from the Reussir agent instructions.}
 \li{\strong{Forester before jujutsu.} The repository is managed with jujutsu on top of git. If Forester ever needs something jujutsu cannot handle, such as a git submodule for the theme, keep Forester and drop jujutsu. Given 2026-11-13.}
+\li{\strong{Push directly, overwrite nothing.} Changes to this journal are pushed straight to its main branch, without a pull request. Never force a push or otherwise replace work that someone else pushed: fetch first and put the new change on top. Given 2026-11-13.}
 \li{\strong{Tools come from the flake.} Forester and jujutsu are provided by the development shell of this repository and are not expected on the host. Given 2026-11-13.}
 }

@@ -4,6 +4,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-2026-11}
 \transclude{log-2026-10}
 \transclude{log-2026-08}
 \transclude{log-2026-07}

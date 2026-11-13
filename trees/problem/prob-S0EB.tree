@@ -1,0 +1,14 @@
+\title{Only the C API path writes the \code{\verb~|index~} data layout entry}
+\taxon{Problem}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{compiler}
+\tag{platforms}
+\meta{status}{open}
+\meta{created}{2026-11-13}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{Four places stamp a module data layout through \code{\verb~|reussir::translateDataLayout~}. Only the C API entry point appends an entry for the MLIR \code{\verb~|index~} type at the pointer width; the attach-native-target pass, the bridge and the type converter do not, so \code{\verb~|index~} stays 64 bits wide there. On a 64-bit target nothing differs. On a 32-bit target the pointer spec says \code{\verb~|index = 32~} while \code{\verb~|index~} is 64. Found while reviewing \pr{986}; it predates that change and was left alone.}
+\p{\strong{What would close this.} Move the \code{\verb~|index~} entry into \code{\verb~|reussir::translateDataLayout~} and test a 32-bit layout through each of the four paths.}

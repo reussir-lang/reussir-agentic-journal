@@ -1,0 +1,13 @@
+\title{The MLIR \code{\verb~|ptr~} dialect lowers through the Reussir pipeline}
+\taxon{Change}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{compiler-runtime}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{986}
+\import{base-macros}
+
+\p{\code{\verb~|!ptr.ptr~} values and the operations of the upstream \code{\verb~|ptr~} dialect convert to LLVM in both \code{\verb~|reussir-convert-to-llvm~} and \code{\verb~|convert-to-llvm~}, including \code{\verb~|ptr.load~}, \code{\verb~|ptr.store~} and \code{\verb~|ptr.ptr_diff~}, which upstream does not convert. The module data layout describes the pointer type, and the Reussir dialect adds address operations under \code{\verb~|reussir.ptr~}. See [lowering](design-opaque-pointers-lowering). \pr{986}.}

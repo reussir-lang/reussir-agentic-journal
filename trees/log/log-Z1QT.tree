@@ -1,0 +1,13 @@
+\title{Opaque pointers: \code{\verb~|Ptr<A>~}, \code{\verb~|ConstPtr<A>~} and their operations}
+\taxon{Change}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{989}
+\import{base-macros}
+
+\p{\code{\verb~|core::ptr~} declares the opaque pointer types \code{\verb~|Ptr<A>~} and \code{\verb~|ConstPtr<A>~} over the sealed trait \code{\verb~|AddrSpace~}, with the one address space \code{\verb~|core::ptr::Generic~}, and the operations \code{\verb~|offset~}, \code{\verb~|type_offset~}, \code{\verb~|advance~}, \code{\verb~|mask~}, \code{\verb~|addr~}, \code{\verb~|from_addr~}, \code{\verb~|diff~}, \code{\verb~|load~}, \code{\verb~|store~}, \code{\verb~|load_extended~} and \code{\verb~|store_extended~}. Accesses read and write integers, floating-point numbers, \code{\verb~|bool~}, \code{\verb~|char~} and pointers. See [opaque pointers](design-opaque-pointers). \pr{987}, \pr{989}.}

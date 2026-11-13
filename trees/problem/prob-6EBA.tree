@@ -1,0 +1,14 @@
+\title{Offer the \code{\verb~|ptr.load~}, \code{\verb~|ptr.store~} and \code{\verb~|ptr.ptr_diff~} conversions upstream}
+\taxon{Problem}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{compiler}
+\tag{mlir}
+\meta{status}{open}
+\meta{created}{2026-11-13}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{The patterns of [dec-RITS](dec-RITS) fill a gap in the upstream \code{\verb~|PtrToLLVM~} conversion. Until they land upstream they must be kept in step by hand. One change is already known: upstream \code{\verb~|main~} adds an \code{\verb~|isNoundef~} parameter before the ordering in the \code{\verb~|LLVM::LoadOp~} builder, so the positional call in \code{\verb~|PtrLowering.cpp~} will not compile after the next LLVM update.}
+\p{\strong{What would close this.} The three patterns accepted upstream and removed here.}

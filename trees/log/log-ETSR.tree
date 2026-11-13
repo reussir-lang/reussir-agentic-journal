@@ -1,0 +1,13 @@
+\title{MIR text marks record references with a sigil}
+\taxon{Change}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{compiler-runtime}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{987}
+\import{base-macros}
+
+\p{A record reference in textual MIR is written \code{\verb~|#path~}, as in textual HIR. A record named after a builtin type, such as \code{\verb~|Ptr~}, \code{\verb~|Tensor~}, \code{\verb~|Arc~} or \code{\verb~|Token~}, used to parse back as that type or not at all. Hand-written MIR must add the sigil. \pr{987}.}

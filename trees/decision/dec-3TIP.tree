@@ -1,0 +1,21 @@
+\title{Pointers carry no ownership and their operations are unsafe}
+\taxon{Decision}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\meta{status}{accepted}
+\meta{created}{2026-11-13}
+\meta{completed}{2026-11-13}
+\import{base-macros}
+
+\p{\strong{Status:} accepted.}
+\p{\strong{Context.} [Opaque pointers](design-opaque-pointers) can point into reference-counted and copy-on-write objects. A design that tried to keep them sound would have to make a buffer unique before handing out a pointer to it, or tie the pointer to a borrow.}
+\p{\strong{Decision.} A pointer is an address and nothing more, in the manner of \code{\verb~|Ptr~} in Haskell. No pointer operation retains, releases, copies or checks anything. Keeping the object alive and unshared is the business of the caller, with \code{\verb~|core::object::unsafe_inc~} and \code{\verb~|core::object::is_unique~}.}
+\ul{
+\li{Operations that hand out a pointer into an object are prefixed \code{\verb~|unsafe_~}, as \code{\verb~|unsafe_inc~} and \code{\verb~|unsafe_dec~} are. This includes the read-only data pointer, which dangles as easily as a writable one.}
+\li{Containers expose only \code{\verb~|unsafe_data_ptr~}, a \code{\verb~|ConstPtr~}. A writable pointer is made with \code{\verb~|as_mut~}.}
+\li{Accesses are limited to integers, floating-point numbers, \code{\verb~|bool~}, \code{\verb~|char~} and pointers. Loading a reference-counted value through a pointer would need an ownership rule, and none is defined.}
+\li{Pointer types have no methods; the operations are functions of \code{\verb~|core::ptr~}.}
+}
+\p{\strong{Consequences.} The ownership analysis treats a pointer as a plain scalar. An array is released after the last use of the array itself, even if a pointer into it is used later.}

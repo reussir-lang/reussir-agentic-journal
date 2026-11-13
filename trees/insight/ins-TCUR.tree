@@ -1,0 +1,16 @@
+\title{Operation properties cannot be set through the generic C API builder}
+\taxon{Insight}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{mlir}
+\tag{tooling}
+\import{base-macros}
+
+\p{Source: \pr{989}, \pr{990}. Verified.}
+\ul{
+\li{An attribute passed to the generic operation builder is stored as an inherent attribute only when the operation declares it as an attribute. A value declared as a property, such as the \code{\verb~|volatile~} flag of \code{\verb~|ptr.load~} or the flags of \code{\verb~|ptr.ptr_add~}, ends up as a discardable attribute and is ignored. Set it after construction through a small C API helper that calls the generated setter.}
+\li{The default CMake target does not rebuild \code{\verb~|reussir-opt~} and \code{\verb~|reussir-translate~}. After changing a dialect or a conversion, build those two targets by name before running the lit tests, or the tests run against stale tools.}
+\li{Emitted MLIR functions are sorted by mangled name, which starts with the length of the identifier. Order \code{\verb~|CHECK-LABEL~} lines by length first, then alphabetically; an instance of a generic function sorts before every plain function.}
+\li{A local build without OpenXLA skips about a fifth of the lit suite. After changing a textual format, search the tests for inputs written by hand, such as \code{\verb~|echo~} lines that produce a \code{\verb~|.mir~} file, because the skipped tests will not report them. Source: \pr{993}.}
+}

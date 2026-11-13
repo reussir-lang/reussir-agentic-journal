@@ -1,0 +1,100 @@
+\title{Opaque pointers}
+\taxon{Design}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{design}
+\tag{language}
+\tag{compiler}
+\meta{status}{implemented}
+\meta{created}{2026-11-13}
+\meta{completed}{2026-11-13}
+\import{base-macros}
+
+\p{\strong{Status:} implemented.}
+\p{Reussir has raw pointers for code that talks to memory the language does not manage: foreign buffers, device registers, and the storage behind its own containers. They are opaque, as LLVM pointers are: a pointer names an address space and nothing else, and each access says which type it reads or writes. Implemented by \pr{986}, \pr{987}, \pr{989} and \pr{990}; the data pointers of the containers are in \pr{992}.}
+\subtree[design-opaque-pointers-types]{
+\title{Types}
+
+\ul{
+\li{\code{\verb~|Ptr<A>~} is a pointer that may be stored through; \code{\verb~|ConstPtr<A>~} points to memory that is only read. Both are declared in \code{\verb~|core::ptr~} and are prelude names.}
+\li{\code{\verb~|A~} is an address space: a type that implements the sealed trait \code{\verb~|AddrSpace~}. The only one is \code{\verb~|core::ptr::Generic~}, the address space every target has. \code{\verb~|Generic~} is not a prelude name. The trait is sealed so that a new address space is a compiler change.}
+\li{A pointer is a plain value. It is not reference counted, it is \code{\verb~|Sync~}, and it is not allowed as the inner type of \code{\verb~|Nullable~}, because a pointer may itself be null.}
+\li{At the foreign function boundary a pointer is \code{\verb~|*mut ::std::ffi::c_void~} or \code{\verb~|*const ::std::ffi::c_void~}, passed as an integer-like scalar.}
+\li{The textual HIR and MIR spell the types \code{\verb~|Ptr<...>~}, \code{\verb~|ConstPtr<...>~} and \code{\verb~|GenericAddrSpace~}.}
+}
+\transclude{dec-3TIP}
+}
+
+\subtree[design-opaque-pointers-operations]{
+\title{Operations}
+
+\p{The operations are intrinsics declared in \code{\verb~|core::ptr~}. A pointer argument may be of either kind unless stated otherwise, and results keep the kind of their argument.}
+\table{
+\tr{\th{Operation}\th{Meaning}}
+\tr{\td{\code{\verb~|offset(p, bytes, flag)~}}\td{The pointer \code{\verb~|bytes~} bytes after \code{\verb~|p~}.}}
+\tr{\td{\code{\verb~|type_offset<T>()~}}\td{The distance in bytes between two consecutive values of \code{\verb~|T~}.}}
+\tr{\td{\code{\verb~|advance<T>(p, count, flag)~}}\td{\code{\verb~|offset(p, count * type_offset<T>(), flag)~}.}}
+\tr{\td{\code{\verb~|diff(p, q)~}}\td{The distance in bytes from \code{\verb~|q~} to \code{\verb~|p~}; both in one address space.}}
+\tr{\td{\code{\verb~|mask(p, mask)~}}\td{\code{\verb~|p~} with the address bits that are zero in \code{\verb~|mask~} cleared.}}
+\tr{\td{\code{\verb~|addr(p)~}}\td{The address of \code{\verb~|p~}, without exposing its provenance.}}
+\tr{\td{\code{\verb~|expose_addr(p)~}}\td{The address of \code{\verb~|p~}, exposing its provenance.}}
+\tr{\td{\code{\verb~|from_addr<P>(addr)~}}\td{The pointer of type \code{\verb~|P~} to \code{\verb~|addr~}, with exposed provenance.}}
+\tr{\td{\code{\verb~|with_provenance(p, addr)~}}\td{The pointer to \code{\verb~|addr~} that may access what \code{\verb~|p~} may.}}
+\tr{\td{\code{\verb~|as_const(p)~}, \code{\verb~|as_mut(p)~}}\td{\code{\verb~|p~} as a \code{\verb~|ConstPtr~} or as a \code{\verb~|Ptr~}.}}
+\tr{\td{\code{\verb~|load<T>(p)~}, \code{\verb~|store<T>(p, v)~}}\td{Read or write a \code{\verb~|T~}. Only a \code{\verb~|Ptr~} is stored through.}}
+\tr{\td{\code{\verb~|load_extended~}, \code{\verb~|store_extended~}}\td{The same with constant \code{\verb~|volatile~}, \code{\verb~|nontemporal~}, \code{\verb~|invariant~} (load only), \code{\verb~|invariant_group~} and alignment arguments.}}
+\tr{\td{\code{\verb~|launder_invariant_group(p)~}, \code{\verb~|strip_invariant_group(p)~}}\td{The LLVM intrinsics of those names, the partners of the \code{\verb~|invariant_group~} flag.}}
+}
+\ul{
+\li{\code{\verb~|flag~} is a constant of the enum \code{\verb~|core::ptr::PtrArithFlag~}: \code{\verb~|None~}, \code{\verb~|Nusw~}, \code{\verb~|Nuw~} or \code{\verb~|Inbounds~}, the flags of an LLVM \code{\verb~|getelementptr~}. It is a lang item, so a program that offsets a pointer needs the \code{\verb~|core~} interface.}
+\li{The accessed type \code{\verb~|T~} is an integer, a floating-point number, \code{\verb~|bool~}, \code{\verb~|char~} or a pointer. A generic \code{\verb~|T~} is checked when it is instantiated, and an inferred one once it is resolved. A \code{\verb~|bool~} is one byte in memory holding 0 or 1.}
+\li{An alignment is zero, meaning the alignment of \code{\verb~|T~}, or a power of two up to 2^31, the largest the LLVM dialect builders take.}
+\li{Flags and alignments are part of the operation, so they must be constants. In the textual IR they are the immediate of the intrinsic: \code{\verb~|intrinsic#ptr#offset#3~} is an in-bounds offset.}
+\li{\code{\verb~|type_offset~} is the node \code{\verb~|type_offset(T)~} in HIR and MIR, so that it survives until \code{\verb~|T~} is known. \code{\verb~|advance~}, \code{\verb~|load_extended~} and \code{\verb~|store_extended~} are surface forms only; they elaborate to \code{\verb~|offset~}, \code{\verb~|load~} and \code{\verb~|store~}.}
+}
+}
+
+\subtree[design-opaque-pointers-provenance]{
+\title{Provenance}
+
+\p{The operations follow the LLVM provenance model, so that pointer arithmetic can be written without casting through integers.}
+\ul{
+\li{\code{\verb~|addr~} lowers to \code{\verb~|ptrtoaddr~}. It reads the address and tells the optimizer nothing about later integer-to-pointer casts.}
+\li{\code{\verb~|expose_addr~} lowers to \code{\verb~|ptrtoint~}, and \code{\verb~|from_addr~} to \code{\verb~|inttoptr~}. A pointer made by \code{\verb~|from_addr~} may access an object only if its provenance was exposed, by \code{\verb~|expose_addr~} or outside the program, as for a device register.}
+\li{\code{\verb~|with_provenance(p, addr)~} lowers to \code{\verb~|ptr_add(p, addr - addr(p))~}. This is the way to move a pointer to a computed address, for example to align it or to clear and restore tag bits, and keep the right to access the object.}
+\li{\code{\verb~|mask~} lowers to \code{\verb~|llvm.ptrmask~}, and \code{\verb~|diff~} to two \code{\verb~|ptrtoaddr~} and a subtraction, as the upstream translation of \code{\verb~|ptr.ptr_diff~} does.}
+\li{Addresses have the index width of the pointer, which may be smaller than its size. The surface uses \code{\verb~|u64~} and \code{\verb~|i64~}; the lowering extends or truncates.}
+}
+\transclude{prob-UUNE}
+}
+
+\subtree[design-opaque-pointers-lowering]{
+\title{Lowering}
+
+\ul{
+\li{Both pointer types lower to \code{\verb~|!ptr.ptr<#ptr.generic_space>~} of the upstream MLIR \code{\verb~|ptr~} dialect, and use its operations where it has one: \code{\verb~|ptr.ptr_add~}, \code{\verb~|ptr.ptr_diff~}, \code{\verb~|ptr.type_offset~}, \code{\verb~|ptr.load~}, \code{\verb~|ptr.store~}.}
+\li{The Reussir dialect adds only what the \code{\verb~|ptr~} dialect lacks: \code{\verb~|reussir.ptr.addr~}, \code{\verb~|reussir.ptr.expose_addr~}, \code{\verb~|reussir.ptr.from_addr~}, \code{\verb~|reussir.ptr.mask~}, \code{\verb~|reussir.ptr.launder_invariant_group~} and \code{\verb~|reussir.ptr.strip_invariant_group~}.}
+\li{The module data layout gets an entry for \code{\verb~|!ptr.ptr<#ptr.generic_space>~} copied from the layout of LLVM address space 0, written by \code{\verb~|reussir::translateDataLayout~}. Without it a record holding a pointer is laid out differently from its LLVM struct.}
+\li{Flags of \code{\verb~|ptr.load~}, \code{\verb~|ptr.store~} and \code{\verb~|ptr.ptr_add~} are operation properties. The generic C API operation builder cannot set them, so the C API has \code{\verb~|reussirPtrAccessSetFlags~} and \code{\verb~|reussirPtrAddSetFlags~}.}
+}
+\transclude{dec-RITS}
+\transclude{prob-6EBA}
+\transclude{prob-S0EB}
+}
+
+\subtree[design-opaque-pointers-data-pointers]{
+\title{Data pointers of containers}
+
+\p{\code{\verb~|unsafe_data_ptr~} returns a \code{\verb~|ConstPtr<core::ptr::Generic>~} to the first byte or element of a container. There is no mutable form; \code{\verb~|as_mut~} converts the result.}
+\table{
+\tr{\th{Type}\th{Form}\th{Lowering}}
+\tr{\td{\code{\verb~|str~}}\td{\code{\verb~|core::intrinsic::str::unsafe_data_ptr(s)~}}\td{\code{\verb~|reussir.str.data_ptr~}, the pointer field of the string.}}
+\tr{\td{array}\td{\code{\verb~|core::intrinsic::array::unsafe_data_ptr(a)~}}\td{The memref view of the array, then \code{\verb~|memref.memory_space_cast~} and \code{\verb~|ptr.to_ptr~}. The array is borrowed, as by \code{\verb~|get~}.}}
+\tr{\td{\code{\verb~|String~}, \code{\verb~|Vec<T>~}}\td{member \code{\verb~|unsafe_data_ptr~}}\td{A foreign function body over the buffer of the runtime value.}}
+\tr{\td{\code{\verb~|Text~}}\td{member \code{\verb~|unsafe_data_ptr~}}\td{Delegates to the literal or to the owned string.}}
+\tr{\td{\code{\verb~|TextView~}}\td{member \code{\verb~|unsafe_data_ptr~}}\td{The pointer of the underlying text, moved by the offset of the view.}}
+}
+\p{The pointer keeps nothing alive. A container that is released, or a string or vector that is updated, leaves it dangling. Code that needs the container to stay alive or unshared says so with \code{\verb~|core::object::unsafe_inc~} and \code{\verb~|core::object::is_unique~}.}
+}
+

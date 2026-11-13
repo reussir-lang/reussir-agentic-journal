@@ -1,0 +1,10 @@
+\title{\code{\verb~|ptr.to_ptr~} needs its operand in the memory space of the pointer}
+\taxon{Insight}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{mlir}
+\import{base-macros}
+
+\p{Source: \pr{992}. Verified.}
+\p{\code{\verb~|ptr.to_ptr~} turns a memref into a \code{\verb~|!ptr.ptr~}, and the upstream conversion lowers it. Its verifier requires both sides to be in one memory space, and a memref has the default space while Reussir pointers are in \code{\verb~|#ptr.generic_space~}. Cast first with \code{\verb~|memref.memory_space_cast~} to the same memref type in \code{\verb~|#ptr.generic_space~}; both operations convert through the existing pipeline, and the address space cast folds away in LLVM. No Reussir operation is needed to get the data pointer of an array view.}

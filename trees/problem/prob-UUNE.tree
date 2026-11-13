@@ -1,0 +1,18 @@
+\title{Pointer arithmetic flags that are not exposed yet}
+\taxon{Problem}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\tag{compiler}
+\meta{status}{open}
+\meta{created}{2026-11-13}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\ul{
+\li{\code{\verb~|advance<T>(p, count, flag)~} multiplies \code{\verb~|count~} by the size of \code{\verb~|T~} with a wrapping multiplication and puts \code{\verb~|flag~} on the \code{\verb~|ptr.ptr_add~} only. This is sound and weaker than a typed \code{\verb~|getelementptr~} with the same flag, whose scaling is covered by the flag. Carrying \code{\verb~|nsw~} or \code{\verb~|nuw~} on the multiplication needs an overflow-flag attribute that the code generator does not build today.}
+\li{\code{\verb~|diff~} always emits a \code{\verb~|ptr.ptr_diff~} without \code{\verb~|nuw~} or \code{\verb~|nsw~}, and there is no exact element distance.}
+\li{\code{\verb~|load_extended~} and \code{\verb~|store_extended~} have no atomic ordering, although the conversion patterns handle one.}
+}
+\p{\strong{What would close this.} A decision on the surface for each, then the builders. Source: the review recorded in [ses-5R5K](ses-5R5K).}

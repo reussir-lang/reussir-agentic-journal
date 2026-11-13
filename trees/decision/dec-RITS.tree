@@ -1,0 +1,22 @@
+\title{Opaque pointers use the upstream \code{\verb~|ptr~} dialect, with conversion patterns kept in tree}
+\taxon{Decision}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{compiler}
+\tag{mlir}
+\meta{status}{accepted}
+\meta{created}{2026-11-13}
+\meta{completed}{2026-11-13}
+\import{base-macros}
+
+\p{\strong{Status:} accepted.}
+\p{\strong{Context.} [Opaque pointers](design-opaque-pointers) need a representation in MLIR. The upstream \code{\verb~|ptr~} dialect has the type and most operations. Its conversion to the LLVM dialect, \code{\verb~|registerConvertPtrToLLVMInterface~}, covers \code{\verb~|ptr_add~}, \code{\verb~|type_offset~}, constants and casts only; the upstream pull request that added it calls it a stopgap. \code{\verb~|ptr.load~}, \code{\verb~|ptr.store~} and \code{\verb~|ptr.ptr_diff~} came later with a translation to LLVM IR only, which applies to \code{\verb~|#llvm.address_space~} pointers and not to \code{\verb~|#ptr.generic_space~}.}
+\p{\strong{Decision.} Pointers are \code{\verb~|!ptr.ptr<#ptr.generic_space>~} and are converted to the LLVM dialect in \code{\verb~|convert-to-llvm~}. The three missing conversion patterns are written in \code{\verb~|lib/Conversion/BasicOpsLowering/PtrLowering.cpp~}, in upstream style, so that they can be offered upstream and deleted here. Reussir operations are added only for what the \code{\verb~|ptr~} dialect does not have.}
+\p{\strong{Alternatives considered.}}
+\ul{
+\li{\code{\verb~|#llvm.address_space~} pointers that stay until translation. The verifier rejects a \code{\verb~|ptr.load~} of a Reussir type, and with the conversion interface registered \code{\verb~|func.func~} is left unconverted.}
+\li{A Reussir pointer type with its own operations. Rejected by the maintainer: it duplicates the upstream dialect.}
+\li{\code{\verb~|!llvm.ptr~} directly. It gives up the typed surface of the \code{\verb~|ptr~} dialect and its data layout interface before the lowering stage.}
+}
+\p{\strong{Consequences.} The in-house \code{\verb~|mlir-sync~} dialect uses the same route. The patterns must follow upstream when the LLVM dialect builders change; see [the upstreaming problem](prob-6EBA).}

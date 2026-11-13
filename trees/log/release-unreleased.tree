@@ -10,6 +10,8 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-T5E8}
+\transclude{log-Z1QT}
 \transclude{log-OB96}
 \transclude{log-EUZA}
 \transclude{log-C3JZ}
@@ -36,6 +38,8 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-ETSR}
+\transclude{log-03ZZ}
 \transclude{log-8M53}
 \transclude{log-1OT1}
 \transclude{log-NOEI}

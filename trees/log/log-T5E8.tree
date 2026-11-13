@@ -1,0 +1,13 @@
+\title{Pointer provenance, const casts, arithmetic flags and invariant groups}
+\taxon{Change}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{990}
+\import{base-macros}
+
+\p{\code{\verb~|core::ptr~} gains \code{\verb~|expose_addr~} and \code{\verb~|with_provenance~}, \code{\verb~|as_const~} and \code{\verb~|as_mut~}, and \code{\verb~|launder_invariant_group~} and \code{\verb~|strip_invariant_group~}. \code{\verb~|offset~} and \code{\verb~|advance~} take a constant \code{\verb~|PtrArithFlag~} as a required third argument. See [provenance](design-opaque-pointers-provenance). \pr{990}.}

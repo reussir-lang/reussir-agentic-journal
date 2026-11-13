@@ -1,0 +1,26 @@
+\title{Opaque pointers, their operations and container data pointers}
+\taxon{Session}
+\date{2026-11-13}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\tag{compiler}
+\meta{harness}{Claude Code}
+\meta{model-id}{claude-fable-5-2}
+\import{base-macros}
+
+\p{Added opaque pointers to Reussir in a stack of pull requests, reviewed the result with three independent reviewers, fixed what they found, and extended the operation set.}
+\ul{
+\li{\strong{Merged.} \pr{986} brings the \code{\verb~|ptr~} dialect into the pipeline, \pr{987} adds the types, \pr{989} the operations, \pr{990} provenance, const casts, arithmetic flags and invariant groups. \pr{988} builds the \code{\verb~|rcgmp~} integer type through a C API constructor instead of parsing its text.}
+\li{\strong{Open.} \pr{992}, a draft, adds \code{\verb~|unsafe_data_ptr~} to \code{\verb~|str~}, arrays, \code{\verb~|String~}, \code{\verb~|Vec~}, \code{\verb~|Text~} and \code{\verb~|TextView~}.}
+\li{\strong{Design note.} [Opaque pointers](design-opaque-pointers).}
+\li{\strong{Decisions recorded.} [dec-RITS](dec-RITS) and [dec-3TIP](dec-3TIP).}
+\li{\strong{Problems opened.} [prob-UUNE](prob-UUNE), [prob-S0EB](prob-S0EB) and [prob-6EBA](prob-6EBA).}
+\li{\strong{Changelog.} [log-03ZZ](log-03ZZ), [log-ETSR](log-ETSR), [log-Z1QT](log-Z1QT) and [log-T5E8](log-T5E8).}
+\li{\strong{Insights.} [ins-O5TC](ins-O5TC) and [ins-TCUR](ins-TCUR).}
+\li{\strong{Policy recorded.} Direct pushes to the journal, in [standing policies](standing-policies).}
+}
+\p{The review found that the first operation set could not rebuild a usable pointer from an address, that addresses were taken at the pointer size where the index width is required, that alignments above 2^31 were accepted and then dropped, that \code{\verb~|bool~} was accessed as a single bit, and that a record named after a builtin type did not survive a round trip through MIR text. All were fixed before the merges.}
+\p{\strong{Regression and fix.} The sigil change of \pr{987} broke the Ubuntu builds on the main branch: an OpenXLA-only test writes MIR by hand in the old spelling, and the local build has no OpenXLA, so the test never ran before the merge. \pr{993} fixes the two affected tests.}
+
+\p{Not verified in this session: the Windows cross job failed twice on the first pull request, each time with a different package-manager test killed by the runner. A third pull request passed the same job, so it was read as a runner problem and not investigated further.}

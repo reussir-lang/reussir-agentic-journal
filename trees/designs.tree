@@ -16,6 +16,7 @@
 \transclude{design-linear-recurrence}
 \transclude{design-nonlinear-ffi-instrumentation}
 \transclude{design-ownership-analysis}
+\transclude{design-opaque-pointers}
 \transclude{design-per-constructor-box-sizing}
 \transclude{design-polymorphic-ffi}
 \transclude{design-rri}
