@@ -13,11 +13,12 @@
 \ul{
 \li{\strong{Pull request.} \pr{1012}, a draft on the branch \code{\verb~|ci/r2-cache~}. \pr{1013} held the nixpkgs update separately for a short time and was closed when the two were put together.}
 \li{\strong{Decisions recorded.} [dec-0HDJ](dec-0HDJ), [dec-OT7X](dec-OT7X) and [dec-PL4P](dec-PL4P).}
-\li{\strong{Problem opened.} [prob-BOT9](prob-BOT9).}
+\li{\strong{Problem opened and closed.} [prob-BOT9](prob-BOT9).}
 \li{\strong{Insight.} [ins-D4YM](ins-D4YM).}
 \li{\strong{Policy recorded.} One pull request for one request, the endpoint host out of logs, and approval for outside contributors, in [standing policies](standing-policies).}
 }
 \p{\strong{Diagnosis.} The provider's API returned a credential record without an access key or a secret key, and regenerating the credential returned a new secret and still no access key. The provider had an open incident on its customer panel at the time. Regenerating therefore only invalidated the old secret.}
 \p{\strong{Verified.} With the new credentials and the configuration of the pull request, on a development machine: an upload, lookup, download and deletion through rclone; a \code{\verb~|nix copy~} to the bucket and a query of the copied path; and a miss followed by a hit through \code{sccache}. In CI: the extension job passes on the last commit, and its log shows the endpoint host masked.}
-\p{\strong{Not verified.} No Linux or macOS job has completed on the pull request. The Linux build fails in the fetched \code{\verb~|mlir-rcgmp~} runtime, [prob-BOT9](prob-BOT9); the fix is proposed and pinned but had not passed its checks. The Windows jobs and the first cold run against the empty bucket had not finished when the session ended. No lifecycle rule had been confirmed on the bucket.}
+\p{\strong{State of the checks at the end.} With \code{\verb~|mlir-rcgmp~} pinned to its main branch, the macOS job, both Windows jobs and the extension job pass on the pull request. The ARM Linux job builds and fails in two tests of the code generator that fail the same way on the main branch, which \pr{1007} addresses. The x86-64 Linux job had built and was still testing. After the first cold run the bucket held about 19 GB: 8.8 GiB of Nix store paths, 5.6 GiB of compiler outputs and 3.6 GiB of directory archives.}
+\p{\strong{Not verified.} The maintainer reports that a lifecycle rule is set on the bucket. The credentials used in CI cannot read the bucket's configuration, so the rule and its scope were not checked from here.}
 \p{\strong{Repository setting changed.} Workflow runs from all outside contributors now wait for approval; before, only first-time contributors did.}

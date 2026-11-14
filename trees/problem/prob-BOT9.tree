@@ -6,16 +6,16 @@
 \tag{tooling}
 \tag{ci}
 \tag{runtime}
-\meta{status}{open}
+\meta{status}{closed}
 \meta{created}{2026-11-14}
 \meta{updated}{2026-11-14}
 \import{base-macros}
 
-\p{\strong{Status:} open. It blocks \pr{1012}.}
+\p{\strong{Status:} closed on 2026-11-14.}
 \p{\strong{Symptom.} With the nixpkgs revision of [dec-PL4P](dec-PL4P), the Linux build stops in the fetched \code{\verb~|reussir-lang/mlir-rcgmp~} runtime:}
 \pre{\verb~|
 runtime/Binary.cppm:57:24: error: no member named 'add_sat' in namespace 'std'
 ~}
 \p{\strong{Cause.} C++26 renamed the saturating arithmetic functions: \code{\verb~|std::add_sat~} became \code{\verb~|std::saturating_add~}, \code{\verb~|std::mul_sat~} became \code{\verb~|std::saturating_mul~}, and the feature test macro \code{\verb~|__cpp_lib_saturation_arithmetic~} went from 202311 to 202603. A standard library provides one pair or the other. The standard library of GCC 16.2 has only the new names and GCC 15 only the old ones. On macOS, nixpkgs does not compile against the libc++ of LLVM 23 but against Apple's, version 22.1.6 from the SDK, which has only the old names. The runtime called the old names in \code{\verb~|Binary.cppm~}, \code{\verb~|Power.cppm~} and \code{\verb~|Shift.cppm~}, seven calls in all. The Windows jobs are not affected, because the integration is off for the MSVC ABI.}
-\p{\strong{Fix.} The first attempt renamed the calls, \<html:a>[href]{\verb~|https://github.com/reussir-lang/mlir-rcgmp/pull/52~}{mlir-rcgmp pull request 52}, on the assumption that both repositories move to the new toolchain together. That repaired Linux and broke macOS, which had no way to show up in the checks of \code{\verb~|mlir-rcgmp~}: they run on Linux only. The follow-up, \<html:a>[href]{\verb~|https://github.com/reussir-lang/mlir-rcgmp/pull/53~}{pull request 53}, defines \code{\verb~|saturating_add~} and \code{\verb~|saturating_mul~} in the runtime's own namespace, as using-declarations when the macro is at least 202603 and as forwarding templates to the old names otherwise. Both variants were compiled with clang 23, against the standard libraries of GCC 16 and GCC 15. As of 2026-11-14 the follow-up is not merged and no macOS build has passed.}
-\p{\strong{What would close this.} The rename merged in \code{\verb~|mlir-rcgmp~}, the pin in Reussir raised to the merged commit (that repository squashes on merge, so the commit of the branch does not survive), and the Linux and macOS jobs of \pr{1012} passing. The other fetched dependencies have not yet been compiled with GCC 16 past this point, so further errors of the same kind may follow.}
+\p{\strong{Fix.} The first attempt renamed the calls, \<html:a>[href]{\verb~|https://github.com/reussir-lang/mlir-rcgmp/pull/52~}{mlir-rcgmp pull request 52}, on the assumption that both repositories move to the new toolchain together. That repaired Linux and broke macOS, which had no way to show up in the checks of \code{\verb~|mlir-rcgmp~}: they run on Linux only. The follow-up, \<html:a>[href]{\verb~|https://github.com/reussir-lang/mlir-rcgmp/pull/53~}{pull request 53}, defines \code{\verb~|saturating_add~} and \code{\verb~|saturating_mul~} in the runtime's own namespace, as using-declarations when the macro is at least 202603 and as forwarding templates to the old names otherwise. Both variants were compiled with clang 23, against the standard libraries of GCC 16 and GCC 15.}
+\p{\strong{Resolution.} Both pull requests are merged, and \pr{1012} pins \code{\verb~|mlir-rcgmp~} to its main branch at \code{\verb~|dee6c102~}. With that pin the macOS job passes, and both Linux jobs compile the runtime and pass its tests. No other fetched dependency failed with GCC 16. The ARM Linux job still ends in two failing tests of the code generator, which fail the same way on the main branch and are the subject of \pr{1007}; they are unrelated to this problem.}
