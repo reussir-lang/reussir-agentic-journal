@@ -49,3 +49,12 @@
 \transclude{log-9RRC}
 }
 }
+
+\subtree[release-unreleased-platforms]{
+\title{Platforms}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{log-SOG7}
+}
+}

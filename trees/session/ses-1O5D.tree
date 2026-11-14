@@ -12,7 +12,7 @@
 \p{The shared cache bucket became unusable when its provider stopped returning the access key. The session diagnosed that, compared providers, and moved the caches to Cloudflare R2 in \pr{1012}, together with a nixpkgs update that lets macOS take LLVM prebuilt.}
 \ul{
 \li{\strong{Pull request.} \pr{1012}, a draft on the branch \code{\verb~|ci/r2-cache~}. \pr{1013} held the nixpkgs update separately for a short time and was closed when the two were put together.}
-\li{\strong{Decisions recorded.} [dec-0HDJ](dec-0HDJ), [dec-OT7X](dec-OT7X) and [dec-PL4P](dec-PL4P).}
+\li{\strong{Decisions recorded.} [dec-0HDJ](dec-0HDJ), [dec-OT7X](dec-OT7X), [dec-PL4P](dec-PL4P) and [dec-RWZF](dec-RWZF).}
 \li{\strong{Problem opened and closed.} [prob-BOT9](prob-BOT9).}
 \li{\strong{Insight.} [ins-D4YM](ins-D4YM).}
 \li{\strong{Policy recorded.} One pull request for one request, the endpoint host out of logs, and approval for outside contributors, in [standing policies](standing-policies).}
@@ -22,3 +22,4 @@
 \p{\strong{State of the checks at the end.} With \code{\verb~|mlir-rcgmp~} pinned to its main branch, the macOS job, both Windows jobs and the extension job pass on the pull request. The ARM Linux job builds and fails in two tests of the code generator that fail the same way on the main branch, which \pr{1007} addresses. The x86-64 Linux job had built and was still testing. After the first cold run the bucket held about 19 GB: 8.8 GiB of Nix store paths, 5.6 GiB of compiler outputs and 3.6 GiB of directory archives.}
 \p{\strong{Not verified.} The maintainer reports that a lifecycle rule is set on the bucket. The credentials used in CI cannot read the bucket's configuration, so the rule and its scope were not checked from here.}
 \p{\strong{Repository setting changed.} Workflow runs from all outside contributors now wait for approval; before, only first-time contributors did.}
+\p{\strong{After merging.} \pr{1012} was merged, and the Linux jobs of the nightly release then failed, because the binaries need a newer glibc than the runner has. \pr{1014} changes the release check; see [dec-RWZF](dec-RWZF) and the changelog entry [log-SOG7](log-SOG7).}

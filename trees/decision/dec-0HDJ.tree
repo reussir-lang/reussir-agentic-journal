@@ -9,7 +9,7 @@
 \meta{created}{2026-11-14}
 \import{base-macros}
 
-\p{\strong{Status:} accepted. Implemented by \pr{1012}, which is not merged yet.}
+\p{\strong{Status:} accepted. Implemented by \pr{1012}.}
 \p{\strong{Context.} The continuous integration jobs share one S3 bucket with three kinds of content: the objects of \code{sccache}, a Nix binary cache, and directory snapshots that stand in for \code{\verb~|actions/cache~}. The bucket was hosted by Contabo. On 2026-11-14, during an incident of its customer panel, the provider returned no access key for the bucket, in the panel and through its API, so the credentials could not be read or replaced and the caches were unusable. Two older complaints stood beside this: the provider answers bursts of requests with HTTP 429, which Nix needed a reduced connection count to survive, and old objects had to be deleted by hand.}
 \p{\strong{Decision.} The bucket moves to Cloudflare R2. The layout inside the bucket is unchanged: \code{\verb~|sccache/~}, \code{\verb~|nix/~} and \code{\verb~|dir-cache/~}. The workflows read the bucket's S3 API URL from the repository secret \code{\verb~|CLOUDFLARE_R2_API~} and the key pair of an R2 API token from \code{\verb~|AWS_ACCESS_KEY_ID~} and \code{\verb~|AWS_SECRET_ACCESS_KEY~}. The token is scoped to the one bucket with object read and write. All three clients use the region \code{auto}.}
 \p{\strong{Alternatives considered.}}

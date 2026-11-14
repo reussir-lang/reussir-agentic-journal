@@ -1,0 +1,29 @@
+\title{Linux release binaries take the glibc of the pinned nixpkgs}
+\taxon{Decision}
+\date{2026-11-14}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{tooling}
+\tag{ci}
+\tag{platforms}
+\meta{status}{accepted}
+\meta{created}{2026-11-14}
+\import{base-macros}
+
+\p{\strong{Status:} accepted. Implemented by \pr{1014}, which is not merged yet.}
+\p{\strong{Context.} The release workflow builds the Linux binaries in the Nix development shell, points their interpreter at the standard path, removes the run path, and until now ran each of them on the Ubuntu 24.04 runner as proof that they start on a stock system. That worked because the binaries happened to need no symbol newer than glibc 2.39; nothing in the build enforced it. The nixpkgs update of [dec-PL4P](dec-PL4P) moved glibc from 2.42 to 2.44 and GCC from 15 to 16. glibc 2.43 and 2.44 gave new symbol versions to common mathematical functions, among them \code{sqrtf}, \code{log10f}, \code{remainder}, \code{cosh} and \code{sinh}, and the linker binds to the newest version. The binaries then asked for \code{\verb~|GLIBC_2.43~}, \code{\verb~|GLIBC_2.44~} and \code{\verb~|GLIBCXX_3.4.36~}, did not load on the runner, and the Linux release jobs failed. The checks of a pull request do not run the release workflow, so this appeared only on the main branch.}
+\p{\strong{Decision.} The Linux release binaries require the glibc and the libstdc++ of the pinned nixpkgs. The release workflow no longer runs them. It reads the interpreter, the run path and the needed libraries with \code{readelf} and fails on a dependency on the LLVM or MLIR shared libraries or on a store path. The maintainer chose this over restoring compatibility with older systems.}
+\p{\strong{Alternatives considered.}}
+\ul{
+\li{Linux back on the nixpkgs revision of 2026-08-31 through a second flake input, with macOS on the new one. It restores the toolchain that last released, and the floor stays accidental.}
+\li{Reverting the nixpkgs update for all systems. macOS would compile LLVM once.}
+\li{The old revision for the release job only. Tests and shipped binaries would come from different compilers.}
+\li{Linking against a pinned glibc 2.39 with a static libstdc++. It makes the floor deliberate and is the largest change. A static libstdc++ alone does not help, because the glibc versions remain.}
+\li{Runners with Ubuntu 26.04. That release has glibc 2.43, so the binaries would still not load.}
+}
+\p{\strong{Consequences.}}
+\ul{
+\li{The Linux nightlies need glibc 2.44 or newer and the libstdc++ of GCC 16. They do not start on Ubuntu 24.04 or 26.04.}
+\li{The floor moves with every update of nixpkgs, and no check reports it.}
+\li{The macOS binaries are still run from a bare environment in the release workflow.}
+}

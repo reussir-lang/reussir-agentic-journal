@@ -1,0 +1,13 @@
+\title{Linux nightly builds need glibc 2.44}
+\taxon{Change}
+\date{2026-11-14}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{platforms}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1014}
+\import{base-macros}
+
+\p{The Linux binaries of the nightly release are now linked against glibc 2.44 and the libstdc++ of GCC 16, and need at least those versions to start. Earlier nightlies ran on glibc 2.39, for example on Ubuntu 24.04. See [dec-RWZF](dec-RWZF). \pr{1012}, \pr{1014}.}
