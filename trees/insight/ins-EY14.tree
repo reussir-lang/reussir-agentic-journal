@@ -1,0 +1,20 @@
+\title{Where the CI time and the cache space go}
+\taxon{Insight}
+\date{2026-11-14}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{tooling}
+\tag{ci}
+\import{base-macros}
+
+\p{Source: the job logs and the cache bucket on 2026-11-14, one cold run of \pr{1012} and the runs on the main branch after it. The numbers are from the ARM Linux job unless stated.}
+\ul{
+\li{\strong{Bazel's compilations are cached, Bazel's work is not.} With a warm compiler cache the job had 4,988 hits and 18 misses, so the objects of the IFRT build are reused. Bazel itself keeps nothing between jobs: it fetches its dependencies and runs all 6,372 actions again, 48 minutes cold and 7 minutes when every compilation is a hit. Each later CMake target that depends on the archives starts it again for 10 to 20 seconds, seven more times in a job.}
+\li{\strong{Bazel is not what fills the bucket.} Its objects are small; all objects under 1 MiB are 1.4 GiB over four platforms. Half of the 9.5 GiB of compiler outputs is in 75 objects.}
+\li{\strong{The large objects are rewritten per commit.} One commit that changed C++ added 187 MiB to one platform: two C++ module interfaces, 69 and 34 MiB compressed, and \code{\verb~|reussir_backend_sys~} twice, 38 MiB each. \code{\verb~|mlir-sys~} is 130 MiB and was stored three to four times per job. Nothing in the workflows deletes objects, so the bucket is bounded only by its lifecycle rule.}
+\li{\strong{A lifecycle rule expires by age, not by use.} An object that is still hit every day is deleted when it reaches the age limit, so the third-party crates and the IFRT objects, written together, expire together, and the run after that is cold.}
+\li{\strong{Cargo rebuilt the same crates per invocation.} CMake calls cargo once per package, and cargo resolved features for each selection separately. Over the 18 build and test invocations that gave 775 library builds for 467 crates. In a job where every compilation was a hit, the test target of \code{\verb~|reussir-codegen~} still built for 8 minutes. See [dec-H84J](dec-H84J).}
+\li{\strong{RUSTFLAGS decide whether a target directory is reused.} The same directory built once with \code{\verb~|RUSTFLAGS=-Awarnings~} and once with the flags of \code{\verb~|.cargo/config.toml~} compiles everything twice; this happened to the PJRT runtime, 196 crates.}
+\li{\strong{A warm Linux job takes 55 minutes.} About 9 are Bazel, 11 are cargo steps that had no compiler cache, 8 the rebuild in the code generator's test target, and 10 are tests running.}
+\li{\strong{Identical commits were tested more than once.} The merge queue tests the commit that becomes the head of the main branch, and the push then ran the same workflows on it. See [dec-E5LF](dec-E5LF).}
+}

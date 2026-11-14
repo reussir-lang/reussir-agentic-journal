@@ -1,0 +1,22 @@
+\title{The CMake build resolves cargo features for the whole workspace}
+\taxon{Decision}
+\date{2026-11-14}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{tooling}
+\tag{ci}
+\tag{runtime}
+\meta{status}{accepted}
+\meta{created}{2026-11-14}
+\import{base-macros}
+
+\p{\strong{Status:} accepted. Implemented by \pr{1016}, which is not merged yet.}
+\p{\strong{Context.} CMake builds and tests the compiler crates with one cargo invocation per package, all in one target directory. Cargo resolves features for the selected package alone, so a shared dependency gets a different feature set from one invocation to the next, and cargo builds it and everything above it again. Over the 18 build and test invocations this gave 775 library builds for 467 crates; \code{\verb~|reussir-backend-sys~} was built in six variants. See [ins-EY14](ins-EY14).}
+\p{\strong{Decision.} The cargo invocations of the compiler crates set cargo's workspace feature unification through one variable in \code{\verb~|cmake/ReussirCargo.cmake~}. With it the same invocations need 532 library builds and every first-party crate has one variant. The builds of the runtime itself, the WebAssembly component and plain cargo commands outside CMake keep the resolution per package: a unification for the whole repository would change the features of the dependencies of the standalone runtime.}
+\p{\strong{Consequences.}}
+\ul{
+\li{The copy of the runtime that is linked into the JIT gets the default features of the runtime, so it uses mimalloc as the standalone runtime does. Before, \code{\verb~|reussir-jit~} linked it with the system allocator. The maintainer's guidance was that the runtime uses mimalloc and that feature flags may be adjusted to reduce work. Passing \code{\verb~|--no-default-features~} to the same invocations restores the old behaviour, because the runtime is the only member with default features.}
+\li{The features of third-party crates are the union over the workspace. Against the union of what the invocations built before, the additions are \code{\verb~|rand/small_rng~} and the two crates that mimalloc brings.}
+\li{The unification is an unstable cargo option. The pinned nightly toolchain provides it.}
+}
+\p{\strong{Alternative considered.} A workspace-hack crate maintained with cargo-hakari gives the same effect on stable cargo. It adds a generated crate and a dependency line to every member, and the runtime bundle that \code{rene} ships would have to exclude it.}

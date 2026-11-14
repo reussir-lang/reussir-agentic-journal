@@ -1,0 +1,25 @@
+\title{CI cancels superseded runs and trusts the merge queue's run}
+\taxon{Decision}
+\date{2026-11-14}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{tooling}
+\tag{ci}
+\meta{status}{accepted}
+\meta{created}{2026-11-14}
+\import{base-macros}
+
+\p{\strong{Status:} accepted. Implemented by \pr{1015}, which is not merged yet.}
+\p{\strong{Context.} No workflow had a concurrency group, so a push did not stop the runs it made obsolete; three commits reached the main branch within six minutes and each ran every pipeline. The merge queue tests an entry as the commit that becomes the head of the main branch, and the push run for that commit repeated the test. See [ins-EY14](ins-EY14).}
+\p{\strong{Decision.}}
+\ul{
+\li{Each test workflow has a concurrency group per workflow and ref that cancels the run in progress. Entries of the merge queue have a ref each and are not cancelled.}
+\li{The release workflow cancels only its build jobs. Publishing has a group of its own without cancellation, so a release is not abandoned between the deletion of the old one and the creation of the new one.}
+\li{On a push, the Linux, macOS and Windows test workflows ask the API for a passed merge-queue run of the same workflow at the same commit and skip their jobs when there is one. A commit that reached the main branch without the queue is tested by the push run as before, and a failed query counts as not tested.}
+}
+\p{\strong{Alternatives considered.}}
+\ul{
+\li{Removing the push trigger. Rejected: merges that bypass the queue would leave the main branch untested.}
+\li{Path filters for changes to documentation or to other workflows. Rejected for now: \code{\verb~|build-ubuntu~} and \code{\verb~|build-ubuntu-arm~} are required checks that come from a matrix, and a matrix job skipped before expansion does not report those names, so a filtered pull request could not merge.}
+}
+\p{\strong{Consequences.} On the main branch only the newest of several quick pushes is tested to the end. The names of the required checks are unchanged.}
