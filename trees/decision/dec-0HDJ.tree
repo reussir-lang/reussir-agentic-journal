@@ -1,0 +1,32 @@
+\title{The CI caches live in a Cloudflare R2 bucket}
+\taxon{Decision}
+\date{2026-11-14}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{tooling}
+\tag{ci}
+\meta{status}{accepted}
+\meta{created}{2026-11-14}
+\import{base-macros}
+
+\p{\strong{Status:} accepted. Implemented by \pr{1012}, which is not merged yet.}
+\p{\strong{Context.} The continuous integration jobs share one S3 bucket with three kinds of content: the objects of \code{sccache}, a Nix binary cache, and directory snapshots that stand in for \code{\verb~|actions/cache~}. The bucket was hosted by Contabo. On 2026-11-14, during an incident of its customer panel, the provider returned no access key for the bucket, in the panel and through its API, so the credentials could not be read or replaced and the caches were unusable. Two older complaints stood beside this: the provider answers bursts of requests with HTTP 429, which Nix needed a reduced connection count to survive, and old objects had to be deleted by hand.}
+\p{\strong{Decision.} The bucket moves to Cloudflare R2. The layout inside the bucket is unchanged: \code{\verb~|sccache/~}, \code{\verb~|nix/~} and \code{\verb~|dir-cache/~}. The workflows read the bucket's S3 API URL from the repository secret \code{\verb~|CLOUDFLARE_R2_API~} and the key pair of an R2 API token from \code{\verb~|AWS_ACCESS_KEY_ID~} and \code{\verb~|AWS_SECRET_ACCESS_KEY~}. The token is scoped to the one bucket with object read and write. All three clients use the region \code{auto}.}
+\p{\strong{Alternatives considered.}}
+\table{
+\tr{\th{Provider}\th{Why not}}
+\tr{\td{Contabo, with a lifecycle rule}\td{Flat price and no fees for requests or downloads, and it supports lifecycle rules, but it keeps the dependence on a panel that failed and the request rate limit.}}
+\tr{\td{Backblaze B2}\td{Cheapest storage and it has hard usage caps, but downloads are free only up to three times the stored volume.}}
+\tr{\td{AWS S3}\td{Downloads to the hosted runners are billed per gigabyte, which dominates the cost of a cache.}}
+\tr{\td{Cachix}\td{Serves only the Nix cache; the free allowance of 5 GB is below the size of one toolchain closure.}}
+}
+\p{\strong{Consequences.}}
+\ul{
+\li{Downloads cost nothing. Storage is billed by use beyond 10 GB, and requests beyond one million writes and ten million reads a month. R2 has budget alerts and no hard spending limit.}
+\li{Old objects are removed by a lifecycle rule configured on the bucket. A rule expires an object by its age since upload and not by its last use, so a live object is deleted on schedule and written again by the next job.}
+\li{The settings \code{\verb~|http-connections = 8~} and \code{\verb~|download-attempts = 12~} were removed from the Nix configuration of the jobs. They existed only for the old provider's rate limit, and the first also slowed substitution from \code{\verb~|cache.nixos.org~}.}
+\li{Only a run that receives the repository secrets can write to the bucket: a push or a pull request from a branch of the repository, or the merge queue. Every workflow uses the \code{\verb~|pull_request~} trigger, so a pull request from a fork gets no secrets and falls back to local caches. Runs from outside contributors additionally wait for approval, see [standing policies](standing-policies).}
+\li{The bucket started empty; the first run of each job after the move is a cold build.}
+\li{The host name of the endpoint is kept out of job logs, see [ins-D4YM](ins-D4YM).}
+}
+\p{Related: [dec-OT7X](dec-OT7X) on how \code{sccache} uses the bucket, and [dec-PL4P](dec-PL4P) on the toolchain change made in the same pull request.}

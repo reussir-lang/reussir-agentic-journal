@@ -1,0 +1,16 @@
+\title{A value derived from a secret is not masked in job logs}
+\taxon{Insight}
+\date{2026-11-14}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{tooling}
+\tag{ci}
+\import{base-macros}
+
+\p{Source: \pr{1012}. Verified in a job log.}
+\ul{
+\li{GitHub Actions masks a secret only where its exact value appears. The cache action receives the bucket URL as a secret and splits it into host and bucket, and the host alone was then printed in clear by Nix, by rclone and in the environment listing of every later step.}
+\li{Printing \code{\verb~|::add-mask::~} followed by the derived value, before anything else uses it, masks it for the rest of the job. After that the same log showed the host as \code{\verb~|***~} in every place.}
+\li{A mask does not reach back. Logs written before it keep the value; on a public repository the runs have to be deleted to remove it.}
+\li{When trying a cache configuration on a development machine, clear the \code{\verb~|SCCACHE_*~} variables of the shell first. They take precedence over the file named by \code{\verb~|SCCACHE_CONF~}, so the test otherwise talks to whatever server the shell is set up for.}
+}

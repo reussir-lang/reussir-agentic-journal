@@ -14,4 +14,7 @@
 \li{\strong{Forester before jujutsu.} The repository is managed with jujutsu on top of git. If Forester ever needs something jujutsu cannot handle, such as a git submodule for the theme, keep Forester and drop jujutsu. Given 2026-11-13.}
 \li{\strong{Push directly, overwrite nothing.} Changes to this journal are pushed straight to its main branch, without a pull request. Never force a push or otherwise replace work that someone else pushed: fetch first and put the new change on top. Given 2026-11-13.}
 \li{\strong{Tools come from the flake.} Forester and jujutsu are provided by the development shell of this repository and are not expected on the host. Given 2026-11-13.}
+\li{\strong{One request, one pull request.} Work that was asked for as one change goes into one pull request. Do not split it into several unless a maintainer asks for that, and say so before opening a second one. Given 2026-11-14.}
+\li{\strong{The cache endpoint stays out of logs.} The host name of the CI cache bucket is not a credential, but it is not to appear in job logs, pull requests or this journal. Mask values derived from the secret, see [ins-D4YM](ins-D4YM). Given 2026-11-14.}
+\li{\strong{Outside runs need approval.} Workflow runs from outside contributors wait for a maintainer's approval, so that nobody outside the project can fill the cache bucket. Keep the workflows on the \code{\verb~|pull_request~} trigger, which withholds the secrets from forks. Given 2026-11-14.}
 }

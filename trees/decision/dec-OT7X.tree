@@ -1,0 +1,23 @@
+\title{sccache reads and writes the bucket once per compilation}
+\taxon{Decision}
+\date{2026-11-14}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{tooling}
+\tag{ci}
+\meta{status}{accepted}
+\meta{created}{2026-11-14}
+\meta{completed}{2026-11-14}
+\import{base-macros}
+
+\p{\strong{Status:} accepted.}
+\p{\strong{Context.} With the move to a provider that bills requests, [dec-0HDJ](dec-0HDJ), the way \code{sccache} uses the bucket was reconsidered. In the current setup every compilation is one read, and one more write on a miss. The alternative keeps the cache on the runner's disk, downloads it as one archive when a job starts and uploads it again when the job ends, as the directory snapshots do.}
+\p{\strong{Decision.} \code{sccache} keeps talking to the bucket directly.}
+\p{\strong{Why.}}
+\ul{
+\li{The request volume is small. The repository has about 240 C and C++ translation units and about 580 crates in its lock file, so a job makes on the order of a thousand compiler calls and a push with five jobs at most about ten thousand requests. The monthly free allowance covers more than a thousand fully warm pushes or a hundred fully cold ones, and a push beyond it costs less than a cent when warm and less than five cents when cold.}
+\li{An object is shared as soon as it is compiled, across the jobs of one push and across branches. An archive is written by whichever job finishes last and is seen by nobody before that.}
+\li{An archive is downloaded and unpacked whole even when a job needs little of it, and one changed file uploads all of it again. Each archive is also a full copy in storage.}
+}
+\p{\strong{Consequences.} A build depends on the bucket while it runs. The action that starts the server already retries and then falls back to the local disk when the bucket cannot be reached. The archive pattern stays in use for directories that change rarely, such as the cargo registry and the Windows SDK.}
+\p{\strong{What would change this.} A request count that leaves the free allowance by a wide margin, or a provider that limits the request rate as the previous one did.}

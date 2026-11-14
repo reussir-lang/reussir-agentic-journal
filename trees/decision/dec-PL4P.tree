@@ -1,0 +1,23 @@
+\title{macOS takes LLVM prebuilt from nixpkgs, without an overlay}
+\taxon{Decision}
+\date{2026-11-14}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{tooling}
+\tag{ci}
+\tag{platforms}
+\meta{status}{accepted}
+\meta{created}{2026-11-14}
+\import{base-macros}
+
+\p{\strong{Status:} accepted. Implemented by \pr{1012}, which is not merged yet and is blocked by [prob-BOT9](prob-BOT9).}
+\p{\strong{Context.} The flake carried an overlay for darwin that removed one test, \code{\verb~|llvm/test/tools/dsymutil/codesign.test~}, from the LLVM sources, because that test fails under the codesigning restrictions of the build environment. The overlay changes the derivation, so macOS could never take LLVM, MLIR and clang from \code{\verb~|cache.nixos.org~} and built them from source whenever the project's own binary cache did not hold them. That cache was emptied by the move in [dec-0HDJ](dec-0HDJ), which would have cost one build of several hours. At the pinned nixpkgs revision of 2026-08-31 the stock packages for aarch64-darwin were not in the public cache either.}
+\p{\strong{Decision.} The nixpkgs input moves to the revision of 2026-11-11 and the overlay is removed. At that revision \code{\verb~|cache.nixos.org~} serves \code{\verb~|llvmPackages_23~}, version 23.1.3, for aarch64-darwin. A dry run of the macOS development shell fetches LLVM, MLIR and clang and builds only the repackaged Rust toolchain, the symlink join of LLVM and MLIR, and the Node.js wrapper.}
+\p{\strong{Alternative considered.} Homebrew has LLVM 23.1.5. It was not taken: the formula is not versioned until LLVM 24 appears, so its version moves under the pipeline, which is the reason the macOS job left Homebrew before.}
+\p{\strong{Consequences.}}
+\ul{
+\li{LLVM, MLIR and clang move from 23.1.0 to 23.1.3 on Linux and macOS, and GCC with its standard library from 15 to 16.2. The LLVM that the Windows jobs take from conda-forge stays at 23.1.0.}
+\li{GCC 16 exposed a source incompatibility in a fetched dependency, [prob-BOT9](prob-BOT9).}
+\li{The default \code{\verb~|wasm-bindgen-cli~} of nixpkgs moved to 0.2.130 while the workspace pins the crate to 0.2.121, and the extension build rejects a mismatch. The flake now names the versioned attribute \code{\verb~|wasm-bindgen-cli_0_2_121~}, which is prebuilt for all three systems and stays in step across later updates of nixpkgs. Raising the crate version means changing this attribute with it.}
+\li{If a later nixpkgs revision again lacks a prebuilt LLVM for darwin, the macOS job compiles it once and stores it in the project's cache. Check the public cache before moving the input.}
+}

@@ -1,0 +1,20 @@
+\title{mlir-rcgmp does not build with GCC 16's standard library}
+\taxon{Problem}
+\date{2026-11-14}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{tooling}
+\tag{ci}
+\tag{runtime}
+\meta{status}{open}
+\meta{created}{2026-11-14}
+\import{base-macros}
+
+\p{\strong{Status:} open. It blocks \pr{1012}.}
+\p{\strong{Symptom.} With the nixpkgs revision of [dec-PL4P](dec-PL4P), the Linux build stops in the fetched \code{\verb~|reussir-lang/mlir-rcgmp~} runtime:}
+\pre{\verb~|
+runtime/Binary.cppm:57:24: error: no member named 'add_sat' in namespace 'std'
+~}
+\p{\strong{Cause.} C++26 renamed the saturating arithmetic functions: \code{\verb~|std::add_sat~} became \code{\verb~|std::saturating_add~}, \code{\verb~|std::mul_sat~} became \code{\verb~|std::saturating_mul~}, and the feature test macro \code{\verb~|__cpp_lib_saturation_arithmetic~} went from 202311 to 202603. The standard library of GCC 16.2 and libc++ 23.1.3 provide only the new names; GCC 15 provides only the old ones. The runtime calls the old names in \code{\verb~|Binary.cppm~}, \code{\verb~|Power.cppm~} and \code{\verb~|Shift.cppm~}, seven calls in all. The Windows jobs are not affected, because the integration is off for the MSVC ABI.}
+\p{\strong{Prepared fix.} Rename the seven calls in \code{\verb~|mlir-rcgmp~} and move that repository's nixpkgs input to the same revision, so that its own checks build with the new names. Then raise the pinned commit in \code{\verb~|cmake/RCGMP.cmake~}. A shim that selects the name by the feature test macro was not chosen: both repositories move to the new toolchain together, so nothing needs the old names afterwards. As of 2026-11-14 the change exists only as a local commit and has not been pushed or built.}
+\p{\strong{What would close this.} The rename merged in \code{\verb~|mlir-rcgmp~}, the pin in Reussir raised to the merged commit, and the Linux and macOS jobs of \pr{1012} passing. The other fetched dependencies have not yet been compiled with GCC 16 past this point, so further errors of the same kind may follow.}
