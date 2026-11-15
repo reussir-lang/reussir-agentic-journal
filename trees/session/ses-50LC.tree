@@ -11,7 +11,7 @@
 
 \p{After the caches moved in [ses-1O5D](ses-1O5D), the session measured where the CI time and the cache space go, [ins-EY14](ins-EY14), and opened one pull request for each cause of repeated work.}
 \ul{
-\li{\pr{1015}: concurrency groups, and no push run for a commit the merge queue tested. [dec-E5LF](dec-E5LF).}
+\li{\pr{1015} and \pr{1021}: concurrency groups, and no push run for a commit the merge queue tested. [dec-E5LF](dec-E5LF).}
 \li{\pr{1016}: one cargo feature resolution for the compiler crates. [dec-H84J](dec-H84J).}
 \li{\pr{1017}: the PJRT runtime tests reuse the target directory that CMake built, and the \code{rene} steps use the compiler cache.}
 \li{\pr{1018}: the cargo directory caches are keyed on the tracked lock file. The old pattern matched lock files under the target directory after a build, so the save step and the restore step disagreed on the key and every run uploaded the archive again, 1.3 GiB for the Windows test job.}
@@ -19,4 +19,4 @@
 \li{\pr{1020}: fixed values for the date macros that mimalloc prints, so its object is the same on every build.}
 }
 \p{\strong{Verified.} The counts of library builds come from cargo's unit graphs with the pinned toolchain. A clippy build with the compiler cache named through cargo's \code{\verb~|--config~} flag was served from the cache on a clean second run. The disagreement of the directory cache keys is in the job logs.}
-\p{\strong{State.} \pr{1015} to \pr{1019} were merged while their checks were still running; \pr{1020} is a draft. On the main branch the cancellation of superseded runs was observed, and the lookup of the merge-queue run reported no run for a commit that was merged directly, which is correct. The first complete run of all five changes together had not finished when this was written, so the step times after the changes are not recorded here.}
+\p{\strong{State.} All seven pull requests were merged while their checks were still running. On the main branch the cancellation of superseded runs was observed, and the lookup of the merge-queue run reported no run for a commit that was merged directly, which is correct. The first complete run of all five changes together had not finished when this was written, so the step times after the changes are not recorded here.}
