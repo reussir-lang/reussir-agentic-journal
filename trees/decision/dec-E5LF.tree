@@ -9,7 +9,7 @@
 \meta{created}{2026-11-14}
 \import{base-macros}
 
-\p{\strong{Status:} accepted. Implemented by \pr{1015}, which is not merged yet.}
+\p{\strong{Status:} accepted. Implemented by \pr{1015}.}
 \p{\strong{Context.} No workflow had a concurrency group, so a push did not stop the runs it made obsolete; three commits reached the main branch within six minutes and each ran every pipeline. The merge queue tests an entry as the commit that becomes the head of the main branch, and the push run for that commit repeated the test. See [ins-EY14](ins-EY14).}
 \p{\strong{Decision.}}
 \ul{
@@ -22,4 +22,10 @@
 \li{Removing the push trigger. Rejected: merges that bypass the queue would leave the main branch untested.}
 \li{Path filters for changes to documentation or to other workflows. Rejected for now: \code{\verb~|build-ubuntu~} and \code{\verb~|build-ubuntu-arm~} are required checks that come from a matrix, and a matrix job skipped before expansion does not report those names, so a filtered pull request could not merge.}
 }
-\p{\strong{Consequences.} On the main branch only the newest of several quick pushes is tested to the end. The names of the required checks are unchanged.}
+\p{\strong{Consequences.}}
+\ul{
+\li{On the main branch only the newest of several quick pushes is tested to the end. This was observed on the day of the merge: five commits reached the main branch within six minutes, and the runs of the first four were cancelled.}
+\li{The names of the required checks are unchanged.}
+\li{The lookup is a job of its own, so every push to the main branch waits for one more runner before its test jobs start. When the runners are saturated that wait is long; the lookup of the macOS workflow waited 18 minutes once. Recent merges did not go through the queue, so the lookup found nothing to skip. If the queue stays unused, the lookup costs more than it saves and can be removed without touching the concurrency groups.}
+\li{The checks of a pull request keep running after the pull request is merged. Its concurrency group is the pull request's ref, and the push to the main branch is in another group. Cancel them by hand when the runners are needed.}
+}

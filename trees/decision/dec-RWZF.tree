@@ -10,7 +10,7 @@
 \meta{created}{2026-11-14}
 \import{base-macros}
 
-\p{\strong{Status:} accepted. Implemented by \pr{1014}, which is not merged yet.}
+\p{\strong{Status:} accepted. Implemented by \pr{1014}.}
 \p{\strong{Context.} The release workflow builds the Linux binaries in the Nix development shell, points their interpreter at the standard path, removes the run path, and until now ran each of them on the Ubuntu 24.04 runner as proof that they start on a stock system. That worked because the binaries happened to need no symbol newer than glibc 2.39; nothing in the build enforced it. The nixpkgs update of [dec-PL4P](dec-PL4P) moved glibc from 2.42 to 2.44 and GCC from 15 to 16. glibc 2.43 and 2.44 gave new symbol versions to common mathematical functions, among them \code{sqrtf}, \code{log10f}, \code{remainder}, \code{cosh} and \code{sinh}, and the linker binds to the newest version. The binaries then asked for \code{\verb~|GLIBC_2.43~}, \code{\verb~|GLIBC_2.44~} and \code{\verb~|GLIBCXX_3.4.36~}, did not load on the runner, and the Linux release jobs failed. The checks of a pull request do not run the release workflow, so this appeared only on the main branch.}
 \p{\strong{Decision.} The Linux release binaries require the glibc and the libstdc++ of the pinned nixpkgs. The release workflow no longer runs them. It reads the interpreter, the run path and the needed libraries with \code{readelf} and fails on a dependency on the LLVM or MLIR shared libraries or on a store path. The maintainer chose this over restoring compatibility with older systems.}
 \p{\strong{Alternatives considered.}}

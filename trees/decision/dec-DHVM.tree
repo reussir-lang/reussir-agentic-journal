@@ -1,0 +1,21 @@
+\title{CI keeps Bazel's output tree for the IFRT build}
+\taxon{Decision}
+\date{2026-11-14}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{tooling}
+\tag{ci}
+\meta{status}{accepted}
+\meta{created}{2026-11-14}
+\import{base-macros}
+
+\p{\strong{Status:} accepted. Implemented by \pr{1019}.}
+\p{\strong{Context.} Bazel builds the IFRT support archives. Its compilations go through the compiler cache, but Bazel itself kept nothing between jobs, so every Linux job fetched the external repositories and ran all 6,372 actions again: 7 minutes when every compilation was a hit, 48 minutes cold. See [ins-EY14](ins-EY14).}
+\p{\strong{Decision.} The Linux test workflow restores Bazel's output tree, the directory that \code{\verb~|cmake/ifrt/build.py~} passes as \code{\verb~|--output_user_root~}, from the directory cache before the build, and saves it after the build when the exact key is new. The key hashes \code{\verb~|cmake/ifrt~}, \code{\verb~|cmake/stablehlo~} and \code{\verb~|flake.lock~}; an older snapshot is restored by prefix. Bazel validates what it finds against its inputs by content, so a snapshot from other inputs gives a slower build and never a stale one.}
+\p{\strong{Measured on a development machine.} A full build took 502 seconds for 6,379 actions. The tree is 820 MB on disk and 424 MB as a compressed archive. After deleting the tree, the generated workspace and both archives and restoring the snapshot in 2.4 seconds, the build took 11 seconds and reported every action as a cache hit.}
+\p{\strong{Alternatives considered.}}
+\ul{
+\li{Caching only the two archives and not starting Bazel when they are present. It is faster still, but the key would have to name every input of the archives exactly, and a missed input gives a stale archive without any error.}
+\li{A Bazel disk cache or remote cache in the bucket. It stores one object per action and has no expiry of its own, which is the growth this work is meant to stop.}
+}
+\p{\strong{Consequences.} The snapshot adds about 0.4 GB per architecture to the bucket and is rewritten only when its key changes. Later CMake targets still start Bazel again to check that the archives are current, 10 to 20 seconds each; that check is deliberate in \code{\verb~|cmake/ifrt/CMakeLists.txt~} and is unchanged. Restoring prints warnings about time stamps in the future, because Bazel dates the files of its own installation ten years ahead.}
