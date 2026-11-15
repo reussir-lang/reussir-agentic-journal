@@ -1,0 +1,22 @@
+\title{An integer literal passed to a generic whose signature names an associated type is not typed}
+\taxon{Problem}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\tag{compiler}
+\meta{status}{open}
+\meta{created}{2026-11-15}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{Symptom.} With one impl of the trait for an integer type, the call below is rejected with \code{\verb~|type annotations needed: cannot resolve a bound~}. It is accepted when the function returns \code{\verb~|T~} instead of \code{\verb~|T::P~}, because the return type then fixes \code{\verb~|T~}.}
+\pre{\verb~|
+pub trait Tr { type P; fn p(self: Self) -> Self::P; }
+impl Tr for i64 { type P = i64; fn p(self: i64) -> i64 { self } }
+fn pr<T: Tr>(x: T) -> T::P { x.p() }
+pub fn a() -> i64 { pr(100) }
+~}
+\p{\strong{Cause.} The checker never picks a type for an integer literal from the impls that could apply. The literal keeps an unknown type, the associated type of that unknown type is deferred, and nothing else in the program decides it.}
+\p{\strong{Reference behaviour.} rustc 1.100 accepts the equivalent program: an integer variable with exactly one applicable impl takes that impl's type.}
+\p{\strong{Open question.} A shift on an untyped literal was left as an error on purpose, because overflow and sign depend on the type and the programmer should state it. The same reasoning may apply here, in which case this is the intended behaviour and only the message needs to name the literal. Found by the fuzzing of associated types recorded in [ses-TKVW](ses-TKVW).}

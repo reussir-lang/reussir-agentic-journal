@@ -17,4 +17,6 @@
 \li{\strong{One request, one pull request.} Work that was asked for as one change goes into one pull request. Do not split it into several unless a maintainer asks for that, and say so before opening a second one. Given 2026-11-14.}
 \li{\strong{The cache endpoint stays out of logs.} The host name of the CI cache bucket is not a credential, but it is not to appear in job logs, pull requests or this journal. Mask values derived from the secret, see [ins-D4YM](ins-D4YM). Given 2026-11-14.}
 \li{\strong{Outside runs need approval.} Workflow runs from outside contributors wait for a maintainer's approval, so that nobody outside the project can fill the cache bucket. Keep the workflows on the \code{\verb~|pull_request~} trigger, which withholds the secrets from forks. Given 2026-11-14.}
+\li{\strong{Checks are static.} The type checker rejects a program where it is written, as rustc does. A program that is accepted and then fails at monomorphization shows a defect of the checker; do not rely on checking at instantiation in the manner of C++ templates. Given 2026-11-15.}
+\li{\strong{Privacy follows Rust.} Keep the private-in-public rules as close to rustc as the language allows: an error where rustc reports an error, a warning where it warns. Compile the equivalent Rust program to see which. Given 2026-11-15.}
 }

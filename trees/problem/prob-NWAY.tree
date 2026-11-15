@@ -1,0 +1,18 @@
+\title{Small gaps in the surface of associated types}
+\taxon{Problem}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\meta{status}{open}
+\meta{created}{2026-11-15}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{Three small points, each accepted or rejected in a way that surprises:}
+\ul{
+\li{An associated const cannot have an associated type as its type. \code{\verb~|const K: Self::A;~} is rejected with a message that a constant type is required, even when every impl binds \code{\verb~|A~} to a scalar.}
+\li{Inside an impl, \code{\verb~|Self::Item { v: 1 }~} is reported as an unknown constructor although the impl binds \code{\verb~|Item~} to a record. In generic code \code{\verb~|T::Item { v: 1 }~} gets the same report with a suggestion of an unrelated record.}
+\li{\code{\verb~|type Self;~} is accepted as the name of an associated type, and \code{\verb~|T::Self~} then works.}
+}
+\p{Found by the fuzzing of associated types recorded in [ses-TKVW](ses-TKVW).}

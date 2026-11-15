@@ -1,0 +1,13 @@
+\title{User types cannot implement Shift}
+\taxon{Problem}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\meta{status}{open}
+\meta{created}{2026-11-15}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{Symptom.} \code{\verb~|Shift~} is sealed like the other operator traits of \code{\verb~|core::ops~}, so \code{\verb~|impl Shift for Bits~} is rejected with \code{\verb~|`Shift` is a built-in trait and cannot be implemented~} and the shift operators are unavailable for user types. The description of \pr{1023} uses an impl of \code{\verb~|Shift~} for a user record as its example of an associated type.}
+\p{\strong{Open question.} Whether the operator traits are to be opened to user types, and if so which of them and under what rules for the built-in lowering. Found by the fuzzing of associated types recorded in [ses-TKVW](ses-TKVW).}

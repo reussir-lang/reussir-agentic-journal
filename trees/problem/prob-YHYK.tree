@@ -1,0 +1,25 @@
+\title{Code quality left over from the associated type work}
+\taxon{Problem}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{compiler}
+\meta{status}{open}
+\meta{created}{2026-11-15}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{A review of the changes that added associated types listed places where the code is longer than it needs to be. Some were taken care of in the same session, see [ses-TKVW](ses-TKVW). These remain:}
+\ul{
+\li{Type walkers that still spell out the recursion over every kind of type: \code{\verb~|mentions_scalable_simd~}, \code{\verb~|collect_private_records~}, the Arc well-formedness sweep, \code{\verb~|InferCtxt::resolve~} and \code{\verb~|occurs~}, and the printers. Each one treats some kinds differently on purpose, so each needs its own look before it moves onto \code{\verb~|Ty::children~}.}
+\li{Match arms that list \code{\verb~|Generic~}, \code{\verb~|Assoc~}, \code{\verb~|Hole~} and \code{\verb~|Bottom~} together inside exhaustive matches, about twenty of them. They were left because an exhaustive match is what makes the compiler point at every site when a kind is added.}
+\li{The cycle detectors for supertraits and for records stored in themselves are still written out separately. They report and cut one edge each, which the shared search over dependency lists does not do.}
+\li{Monomorphization turns the reason an associated const or type has no value into a message in two places with the same three cases.}
+\li{\code{\verb~|library/core/src/ops.rr~} declares one empty impl per operator and numeric type, 165 lines, where the compiler's own table states the same in one line per trait.}
+}
+\p{\strong{Suspected defects seen while reading, not reproduced.}}
+\ul{
+\li{A compiler-provided impl stores an empty list of associated type bindings, while the field is documented to follow the order of the trait's declarations. One lookup indexes it defensively for that reason.}
+\li{\code{\verb~|note_records~} in the interface writer records the records an associated type mentions but not the trait it belongs to. The trait reaches the interface through the bound that names it; a case where it does not was not found.}
+\li{An error about an associated type that no impl decides is kept as the first one per function during monomorphization, so one recorded between two functions is reported at the next function, and some have no location at all.}
+}

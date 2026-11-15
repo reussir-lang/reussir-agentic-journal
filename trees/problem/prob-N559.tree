@@ -1,0 +1,15 @@
+\title{A chain of more than 64 associated type defaults is rejected with a bound-overflow message}
+\taxon{Problem}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\tag{compiler}
+\meta{status}{open}
+\meta{created}{2026-11-15}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{Symptom.} A trait declares \code{\verb~|type A1 = Self::A0;~}, \code{\verb~|type A2 = Self::A1;~} and so on. Up to 64 links everything works. With more, the trait and its impls are still accepted, and the first use of the last type reports \code{\verb~|overflow evaluating the bound `S: Tr` (depth limit 64)~} at the use.}
+\p{\strong{Cause.} Each default that names another one costs one level of the depth limit that guards trait selection, \code{\verb~|SELECT_DEPTH_LIMIT~}. The chain is not recursive, and the bound named in the message holds.}
+\p{\strong{Direction.} Either resolve a chain of defaults without spending selection depth, or report the chain at the trait and name it. Found by the fuzzing of associated types recorded in [ses-TKVW](ses-TKVW).}

@@ -1,0 +1,19 @@
+\title{A sub-trait can redeclare its supertrait's associated type name}
+\taxon{Problem}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\meta{status}{open}
+\meta{created}{2026-11-15}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\pre{\verb~|
+pub trait Base { type Item; fn base(self: Self) -> Self::Item; }
+pub trait Derived: Base { type Item; fn derived(self: Self) -> Self::Item; }
+fn g<T: Derived>(a: T) -> T::Item { a.derived() }
+~}
+\p{\strong{Symptom.} Both traits and their impls are accepted. The function is rejected with \code{\verb~|multiple bounds of `T` declare associated type `Item`: `Base` and `Derived`~}, although \code{\verb~|T~} has one bound, and there is no syntax to say which one is meant. Such a pair of traits cannot be used through a type parameter.}
+\p{\strong{Reference behaviour.} Rust accepts the redeclaration and resolves the ambiguity with \code{\verb~|<T as Derived>::Item~}, a form Reussir does not have.}
+\p{\strong{Options.} Reject the redeclaration where the sub-trait is declared; or let the declaration of the trait named in the bound win over its supertraits; or add the qualified form. Found by the fuzzing of associated types recorded in [ses-TKVW](ses-TKVW).}

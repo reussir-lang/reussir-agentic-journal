@@ -1,0 +1,24 @@
+\title{One bad associated type binding makes every use of the impl's associated types an error}
+\taxon{Problem}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{compiler}
+\tag{diagnostics}
+\meta{status}{open}
+\meta{created}{2026-11-15}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\pre{\verb~|
+pub trait Tr { type A; fn f(self: Self) -> Self::A; }
+pub struct Q { v: i64 }
+impl Tr for Q {
+    type A = i64;
+    type Extra = bool;
+    fn f(self: Q) -> Self::A { self.v }
+}
+~}
+\p{\strong{Symptom.} The expected report for \code{\verb~|Extra~} is followed by \code{\verb~|no associated type `A` on `Self`~} at the method, although \code{\verb~|A~} is declared and bound correctly. A duplicate or a missing binding has the same effect, once per use.}
+\p{\strong{Cause.} \code{\verb~|scan_impl_assoc_tys~} returns nothing when any binding is wrong, so the table that \code{\verb~|Self::Name~} is looked up in is empty for the methods of that impl.}
+\p{\strong{Direction.} Keep the bindings that are valid when another one is not. Found by the fuzzing of associated types recorded in [ses-TKVW](ses-TKVW).}

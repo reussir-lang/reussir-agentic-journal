@@ -1,0 +1,34 @@
+\title{Fuzzing associated types and the fixes that followed}
+\taxon{Session}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\tag{compiler}
+\meta{harness}{Claude Code}
+\meta{model-id}{claude-fable-5-2}
+\import{base-macros}
+
+\p{After \pr{1023} added associated types to traits and \pr{1024} made the shift operators calls of \code{\verb~|Shift::shl~} and \code{\verb~|Shift::shr~}, ten agents wrote and mutated small programs against the merged compiler for twenty minutes each, five on an x86-64 host and five on an aarch64 host. Each had one area: declarations, name lookup, inference, soundness, checking time, the shift trait, serialization, combinations with other features, documented limits, and random mutation. Two more agents read the code of the two changes for quality. The findings were then taken one at a time with the maintainer.}
+\p{\strong{Merged.}}
+\ul{
+\li{\pr{1025}: a record type is well-formed only where its arguments satisfy the bounds on the record's parameters, wherever the type is written. Before, a field whose type is an associated type of an unchecked parameter had the error type without an error, and one program ran with a signed integer read as an unsigned one. \pr{1026} corrects it for \code{\verb~|Sync~}, which is decided from the shape of a type and not by an impl.}
+\li{\pr{1027}: an impl requires its type to implement every direct supertrait of the trait, and an impl of a sub-trait no longer proves a supertrait. \code{\verb~|core~} and the compiler's own table declare the \code{\verb~|Num~} and \code{\verb~|Eq~} impls the old rule supplied.}
+\li{\pr{1028}: the type arguments of a trampoline are checked against the bounds of its target.}
+\li{\pr{1029}: a private record is an error where a public trait defaults an associated type to it or an impl of a public trait for a public type binds one to it, and a warning where a public trait's method names it.}
+\li{\pr{1030}: an undetermined literal is reported once. A literal on the left of a shift that nothing else types stays an error.}
+\li{\pr{1031}: an impl's type binding may name the impl's other associated types through \code{\verb~|Self~}; one that reaches itself is an error.}
+\li{\pr{1032}: an operator method is a value of the enum \code{\verb~|OperatorMethod~} and no longer a trait with a position in a list of names.}
+\li{\pr{1033}: equal deferred associated types share one stand-in hole, and each hole lists the deferred types that mention it. A chain of 12800 shifts typed by the return type is checked in 0.07 s where it took 8.2 s and 2.6 GB.}
+\li{\pr{1034}: a test added by \pr{1030} used \code{\verb~|Nat~} without requiring the feature and failed the Windows job; the case moved to a gated file.}
+}
+\p{\strong{Decisions of the maintainer during the session.}}
+\ul{
+\li{Checks are static, as in Rust. A program that only fails at monomorphization shows a defect of the checker. Recorded in [standing-policies](standing-policies).}
+\li{Every supertrait needs its own impl, as in Rust, including a supertrait without members. The narrower rule, only supertraits that declare members, was considered and not taken.}
+\li{Private-in-public checking follows rustc: an error where rustc gives one, a warning where it warns. Recorded in [standing-policies](standing-policies). Two older differences were left as they are: a private record in the signature of a public function or in a field of a public record is an error where rustc warns, and every method of an impl of a public trait is checked as a public function even when the implementing type is private.}
+\li{An untyped literal does not get a default type. For \code{\verb~|1 << n > 100~} the amount does not determine the left type, since \code{\verb~|i64~}, \code{\verb~|Nat~} and \code{\verb~|Int~} all take an \code{\verb~|i64~} amount, and overflow and sign depend on the type, so the programmer states it. The case where the surrounding expression types the literal must keep working and is pinned by a test.}
+\li{Traits with type parameters are plumbing and not a designed feature, see [prob-20O7](prob-20O7).}
+}
+\p{\strong{Left open.} The reports about diagnostics are the list still being worked on: errors without a location, a late mismatch blamed on the expression that fixed the type, duplicated reports, two associated types that print the same, an ambiguity report that names two of three bounds, documented exclusions rejected as plain parse errors, and readers of the textual forms that accept undeclared or duplicate bindings. Everything else is recorded as a problem: [prob-1261](prob-1261), [prob-72FM](prob-72FM), [prob-N559](prob-N559), [prob-1L0G](prob-1L0G), [prob-15UH](prob-15UH), [prob-EUGR](prob-EUGR), [prob-X59U](prob-X59U), [prob-NWAY](prob-NWAY), [prob-EOSV](prob-EOSV), [prob-20O7](prob-20O7) and [prob-YHYK](prob-YHYK).}
+\p{\strong{Verified.} The unit tests of the compiler crates and the integration tests that do not need the MLIR optimizer were run on the x86-64 host for every change. The first complete run of the checks on the main branch after these changes passed on Linux, macOS and in the release builds; the Windows job failed on the test that \pr{1034} fixes and on the crash described next, and the following run passed everything but that test. A crash of the package tool under Wine in one test of that job appeared once on the main branch and once on an unrelated branch before any of these changes, and did not recur; its cause is not known.}

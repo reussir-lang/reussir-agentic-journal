@@ -1,0 +1,16 @@
+\title{A value of an associated type of a type parameter cannot be used}
+\taxon{Problem}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\tag{diagnostics}
+\meta{status}{open}
+\meta{created}{2026-11-15}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{Symptom.} An associated type cannot carry a bound, so inside generic code nothing is known about \code{\verb~|T::Name~}. That is by design for now, but the reports do not say so: a method call on such a value gives \code{\verb~|cannot access a field of `T::Name`~}, and \code{\verb~|T::Out::Out~} gives \code{\verb~|unknown type~}. A plain type parameter gets the clearer \code{\verb~|no method `size` on `T`; its bounds do not declare one~}.}
+\p{\strong{Related limits.} A record type written with an associated type as argument, such as \code{\verb~|Hold<T::A>~}, can never satisfy a bound on the record's parameter since \pr{1025}. A trait whose result must again implement the trait, a type-level function applied twice, cannot be written.}
+\p{\strong{What works today.} Put the operation in the trait; pass a function from the associated type; or use a second trait with its own associated type.}
+\p{\strong{Direction.} Bounds on associated types, in the trait declaration and in where clauses, are the feature that removes the limit. Until then the two messages should say that an associated type has no bounds. Found by the fuzzing of associated types recorded in [ses-TKVW](ses-TKVW).}

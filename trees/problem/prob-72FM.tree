@@ -1,0 +1,27 @@
+\title{Resolving associated type defaults takes exponential time}
+\taxon{Problem}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{compiler}
+\tag{performance}
+\meta{status}{open}
+\meta{created}{2026-11-15}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{Symptom.} A trait whose defaults each mention the previous default twice makes checking an impl of it exponential in the number of defaults. Nothing has to use the types.}
+\pre{\verb~|
+pub struct P<A, B> { a: A, b: B }
+pub trait Tr {
+    type A0 = i64;
+    type A1 = P<Self::A0, Self::A0>;
+    // ...
+    type A24 = P<Self::A23, Self::A23>;
+    fn f(self: Self) -> i64;
+}
+impl Tr for i64 { fn f(self: i64) -> i64 { self } }
+~}
+\p{\strong{Measured.} 18 defaults take 0.08 s, 20 take 0.28 s, 22 take 1.0 s, 24 take 4.5 s, 26 take about 20 s, for a source file of about one kilobyte. The trait alone is checked in 6 ms.}
+\p{\strong{Cause.} \code{\verb~|scan_impl_assoc_tys~} settles the bindings and defaults of an impl by substituting the whole list once per declaration, and each substitution walks the type as a tree. The type of the last default is a tree of two to the power of the number of defaults, although it is a small graph once interned.}
+\p{\strong{Direction.} Resolve each entry once, in dependency order, and remember the result; and make the substitution visit a shared subterm once. Found by the fuzzing of associated types recorded in [ses-TKVW](ses-TKVW).}

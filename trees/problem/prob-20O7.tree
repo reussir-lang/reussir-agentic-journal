@@ -1,0 +1,26 @@
+\title{Traits with type parameters are only partly implemented}
+\taxon{Problem}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\tag{compiler}
+\meta{status}{open}
+\meta{created}{2026-11-15}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{State.} Since \pr{511} and \pr{512} a trait may be declared with its own type parameters and an impl may give arguments for them, with a check of their number. Every place that would refer to such a trait refuses: as a supertrait it is reported as not supported yet, as a bound \code{\verb~|T: Convert<i64>~} it does not parse, and a method of an impl of it is not found by a call. No test outside the unit tests of the rejections and no library code declares one. The data structures and the serialized forms do carry the arguments.}
+\p{\strong{Decision, 2026-11-15.} This is plumbing, not a feature that was designed. Behaviour that can only be reached through it is not fixed or polished until the feature is designed.}
+\p{\strong{Set aside under that decision.} An impl method is compared with the trait's signature after substituting the trait's parameters, and an associated type that became decidable by the substitution is not resolved before the comparison. The impl below is rejected with \code{\verb~|parameter 1 of method `from_raw` has type `i64` but trait `From` requires `Metres::Raw`~}. A fix has to run the comparison after all impls of the batch are known, or it depends on the order the impls are written in.}
+\pre{\verb~|
+pub trait Unit { type Raw; }
+pub struct Metres { v: i64 }
+impl Unit for Metres { type Raw = i64; }
+pub trait From<U: Unit> { fn from_raw(self: Self, raw: U::Raw) -> Self; }
+pub struct Length { m: i64 }
+impl From<Metres> for Length {
+    fn from_raw(self: Length, raw: i64) -> Length { Length { m: raw } }
+}
+~}
+\p{Found by the fuzzing of associated types recorded in [ses-TKVW](ses-TKVW).}
