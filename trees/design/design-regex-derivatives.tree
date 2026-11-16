@@ -242,25 +242,23 @@ let (source, found) = lexer.next(source);
 pub trait Alphabet {
     /// A set of units, as the builder takes it.
     type Set;
-    /// A partition of the units into classes, and the map from a unit to its class.
-    type Classes;
     /// A loop set in the form the skip of this alphabet uses.
     type Run;
 
-    /// The partition with one class: nothing tells two units apart yet.
-    fn whole() -> Self::Classes;
+    /// The alphabet with one class: nothing tells two units apart yet.
+    fn whole() -> Self;
     /// Split every class into its part inside `set` and its part outside.
-    fn refine(classes: Self::Classes, set: Self::Set) -> Self::Classes;
-    /// The classes that make up `set`, which `classes` was refined with.
-    fn inside(classes: Self::Classes, set: Self::Set) -> ClassSet;
+    fn refine(self: Self, set: Self::Set) -> Self;
+    /// The classes that make up `set`, which `self` was refined with.
+    fn inside(self: Self, set: Self::Set) -> ClassSet;
 
     /// The unit that starts at `at`: its class and its width in bytes;
     /// or that the window ends inside it; or that no unit starts there.
-    fn unit(classes: Self::Classes, window: Window, at: u64) -> Unit;
+    fn unit(self: Self, window: Window, at: u64) -> Unit;
 
     /// How to skip a run of units of the classes in `looping`, or none when this
     /// alphabet has no skip for them.
-    fn run(classes: Self::Classes, looping: ClassSet) -> Option<Self::Run>;
+    fn run(self: Self, looping: ClassSet) -> Option<Self::Run>;
     /// The first position from `at` on where a unit outside the run starts, or the
     /// end of the last whole unit in the window.
     fn skip(run: Self::Run, window: Window, at: u64) -> u64;
@@ -268,6 +266,8 @@ pub trait Alphabet {
 
 pub enum Unit { Class(u32, u64), Incomplete, Malformed }
 ~}
+
+\p{A value of an alphabet is its units divided into classes: \code{\verb~|Bytes~} and \code{\verb~|Chars~} are the two, and \code{\verb~|whole()~} is the alphabet before any set is known. Every function that works on the classes takes the alphabet as \code{\verb~|self~}, so calls chain, \code{\verb~|Bytes::whole().refine(lower).refine(digit)~}, also in code written for any alphabet. The classes are the alphabet itself and not a second type it names, because an associated type cannot carry a bound and nothing could be called on it.}
 
 \p{The trait takes and returns values only, and no collection appears in it. The classes of a matcher are a fold: start from \code{\verb~|whole()~} and \code{\verb~|refine~} with each set met while walking the regex trees of the rules. \code{\verb~|ClassSet~} is the matcher's own type, a set of class numbers; it is how a set node and a loop set are held once the classes are known. In the first version it is 256 bits, the record that also holds a set of bytes, so a matcher has at most 256 classes.}
 
