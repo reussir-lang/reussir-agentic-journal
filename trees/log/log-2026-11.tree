@@ -3,6 +3,7 @@
 
 \p{Changelog entries dated November 2026, newest first.}
 
+\transclude{log-PZAV}
 \transclude{log-BMC9}
 \transclude{log-TFAN}
 \transclude{log-SOG7}

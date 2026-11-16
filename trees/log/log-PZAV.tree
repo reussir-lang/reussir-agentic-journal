@@ -1,0 +1,13 @@
+\title{Masks and masked vector operations}
+\taxon{Change}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1000}
+\import{base-macros}
+
+\p{\code{\verb~|core::simd~} gains \code{\verb~|mask_first<M>(n...)~}, the mask of the leading lanes, and \code{\verb~|any~}, \code{\verb~|all~}, \code{\verb~|count~} and \code{\verb~|first_set~} to read a mask. Every lanewise function and comparison has a masked form named with the suffix \code{\verb~|_masked~}, such as \code{\verb~|add_masked(a, b, m)~}: a lane whose mask bit is clear keeps the lane of the first operand, is false in a comparison, and never traps. See [predication](design-simd-vectors-predication) and [dec-5088](dec-5088). The new operation \code{\verb~|reussir.vector.cttz_elts~} counts the lanes before the first set lane of a scalable mask. \pr{1000}.}
