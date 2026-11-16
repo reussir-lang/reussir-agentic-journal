@@ -10,7 +10,7 @@
 \meta{created}{2026-11-16}
 \import{base-macros}
 
-\p{\strong{Status:} draft, for discussion. The sets of bytes and of characters and the classes of bytes (\pr{1039}) and the UTF-8 sequences of a set of characters (\pr{1041}) are in the standard library; the regex tree and its translation to bytes are in review as \pr{1042}, and the nodes with their derivatives as \pr{1043}; nothing else is implemented.}
+\p{\strong{Status:} draft, for discussion. The sets of bytes and of characters and the classes of bytes (\pr{1039}), the UTF-8 sequences of a set of characters (\pr{1041}) and the regex tree with its translation to bytes (\pr{1042}) are in the standard library; the nodes with their derivatives are in review as \pr{1043}; nothing else is implemented.}
 
 \p{A regex engine written in Reussir whose automaton is built from Brzozowski derivatives when the program runs. Its design follows Paguroidea, a lexer generator that builds its automaton when the program is compiled, and replaces each compile-time device of Paguroidea by a run-time one.}
 

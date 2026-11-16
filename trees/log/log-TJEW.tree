@@ -1,0 +1,13 @@
+\title{The regex tree and its translation to bytes}
+\taxon{Change}
+\date{2026-11-16}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1042}
+\import{base-macros}
+
+\p{\code{\verb~|std::regex::tree~} holds the regex a caller builds, \code{\verb~|Regex~}, from sets of bytes, sets of characters and literals with \code{\verb~|then~}, \code{\verb~|or~}, \code{\verb~|and~}, \code{\verb~|not~}, \code{\verb~|star~}, \code{\verb~|plus~} and \code{\verb~|optional~}. \code{\verb~|to_bytes~} gives a \code{\verb~|ByteRegex~}, the same regex over sets of bytes only, with each set of characters replaced by its UTF-8 encodings. The complement of a regex made of sets of characters stays within strings of whole characters. See [what complement means over bytes](design-regex-derivatives-text). \pr{1042}.}
