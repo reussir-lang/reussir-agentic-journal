@@ -10,7 +10,7 @@
 \meta{created}{2026-11-16}
 \import{base-macros}
 
-\p{\strong{Status:} draft, for discussion. Nothing is implemented.}
+\p{\strong{Status:} draft, for discussion. The alphabet, the sets and the classes of decisions 2 and 5, is in review as \pr{1039}; nothing else is implemented.}
 
 \p{A regex engine written in Reussir whose automaton is built from Brzozowski derivatives when the program runs. Its design follows Paguroidea, a lexer generator that builds its automaton when the program is compiled, and replaces each compile-time device of Paguroidea by a run-time one.}
 
@@ -153,7 +153,7 @@ let (lexer, token) = lexer.next(text, position);
 \subtree[design-regex-derivatives-simd]{
 \title{5. Decoding and acceleration belong to the alphabet}
 
-\p{The matcher has no decoding and no vector code. Both are functions of the alphabet, a sealed trait:}
+\p{The matcher has no decoding and no vector code. Both are functions of the alphabet. The functions on classes are public; \code{\verb~|unit~}, \code{\verb~|run~} and \code{\verb~|skip~} are in a trait private to the module, shown here together:}
 
 \pre{\verb~|
 pub trait Alphabet {
@@ -227,7 +227,7 @@ pub struct Window { base: ConstPtr<Generic>, len: u64 }      // len in bytes
 \ul{
 \li{\code{\verb~|Window~} is private to the module. No public function takes or returns one.}
 \li{The matcher makes a window from a \code{\verb~|TextView~} at the start of a scan and holds that view until the scan returns, so the pointer cannot outlive the bytes.}
-\li{\code{\verb~|Alphabet~} is a sealed trait: \code{\verb~|Bytes~} and \code{\verb~|Chars~} are its only implementations, and its \code{\verb~|unit~} and \code{\verb~|skip~}, which take a window, cannot be called or implemented outside the module.}
+\li{The functions that take a window, \code{\verb~|unit~} and \code{\verb~|skip~}, are in a trait that is private to the module, so they cannot be called or implemented outside it. \code{\verb~|#[sealed]~} does not serve here: it marks a trait whose impls the compiler provides.}
 \li{What a caller sees is positions as numbers in a \code{\verb~|Match~} and text as a \code{\verb~|TextView~}.}
 }
 
