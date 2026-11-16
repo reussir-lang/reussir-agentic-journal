@@ -1,0 +1,13 @@
+\title{Masked vector load and store}
+\taxon{Change}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1003}
+\import{base-macros}
+
+\p{\code{\verb~|simd::load<V>(p, m, passthrough)~} reads the lanes of a one-dimensional vector of numbers whose mask bit is set; the other lanes are not read and take \code{\verb~|passthrough~}. \code{\verb~|simd::store(p, v, m)~} writes the set lanes through a \code{\verb~|Ptr~}. With a tail mask from \code{\verb~|mask_first~} a loop reads and writes its last chunk without touching memory past the end. See [memory](design-simd-vectors-memory). \pr{1003}.}
