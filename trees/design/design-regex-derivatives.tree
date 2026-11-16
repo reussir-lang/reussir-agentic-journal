@@ -89,7 +89,7 @@ space  = ' '+          action: Token::Space
 
 \p{Both read the same kind of input, so both can take it in pieces; see "Reading input" and "Characters".}
 
-\p{The classes are computed once for all rules of a matcher, by refining a partition with each set the rules mention, as .NET and RE\verb~|#~ do. Paguroidea computes classes per state, which suits generated code but not one table indexed by state and class.}
+\p{The classes are computed once for all rules of a matcher, by refining a partition with each set the rules mention (\code{\verb~|whole~} and \code{\verb~|refine~} of the trait), as .NET and RE\verb~|#~ do. Paguroidea computes classes per state, which suits generated code but not one table indexed by state and class.}
 }
 
 \subtree[design-regex-derivatives-actions]{
@@ -117,7 +117,7 @@ pub struct Match { start: u64, length: u64, rule: u32, accept: u32 }
 \tr{\td{\code{\verb~|lexer.fold(source, state)~}}\td{the final state}\td{\code{\verb~|T~} is a function from a state and the matched bytes to a new state: the matcher calls the action of every match in turn}}
 }
 
-\p{\code{\verb~|fold~} is the dispatch form: each rule's function is called as its rule matches, and the state it threads can collect every match. A list of all matches is \code{\verb~|fold~} with an action that appends; \code{\verb~|lexer.matches(source)~} is that, for any \code{\verb~|T~}.}
+\p{\code{\verb~|fold~} is the dispatch form: each rule's function is called as its rule matches, and the state it threads can collect every match. A list of all matches is a fold that appends; \code{\verb~|lexer.matches(source)~} is that, for any \code{\verb~|T~}.}
 
 \p{A rule may be marked as skipped, for white space and comments: \code{\verb~|next~} goes on to the following match, and \code{\verb~|fold~} does not call an action for it.}
 
@@ -157,19 +157,25 @@ let (lexer, token) = lexer.next(text, position);
 pub trait Alphabet {
     /// A set of units, as the builder takes it.
     type Set;
-    /// The map from a unit to its class.
+    /// A partition of the units into classes, and the map from a unit to its class.
     type Classes;
     /// A loop set in the form the skip of this alphabet uses.
     type Run;
 
-    fn classes(sets: Vec<Self::Set>) -> Self::Classes;
+    /// The partition with one class: nothing tells two units apart yet.
+    fn whole() -> Self::Classes;
+    /// Split every class into its part inside `set` and its part outside.
+    fn refine(classes: Self::Classes, set: Self::Set) -> Self::Classes;
+    /// The classes that make up `set`, which `classes` was refined with.
+    fn inside(classes: Self::Classes, set: Self::Set) -> ClassSet;
 
     /// The unit that starts at `at`: its class and its width in bytes;
     /// or that the window ends inside it; or that no unit starts there.
     fn unit(classes: Self::Classes, window: Window, at: u64) -> Unit;
 
-    /// How to skip a run of units of `set`, or none when this alphabet has no skip for it.
-    fn run(set: Self::Set) -> Option<Self::Run>;
+    /// How to skip a run of units of the classes in `looping`, or none when this
+    /// alphabet has no skip for them.
+    fn run(classes: Self::Classes, looping: ClassSet) -> Option<Self::Run>;
     /// The first position from `at` on where a unit outside the run starts, or the
     /// end of the last whole unit in the window.
     fn skip(run: Self::Run, window: Window, at: u64) -> u64;
@@ -178,7 +184,9 @@ pub trait Alphabet {
 pub enum Unit { Class(u32, u64), Incomplete, Malformed }
 ~}
 
-\p{When a state is created, the matcher computes the set of units on which the state loops to itself and asks the alphabet for a run. In the loop it calls \code{\verb~|skip~} for a state that has one. An alphabet that returns no run is matched one unit at a time, and nothing else changes. A skip must return a position where a unit starts.}
+\p{The trait takes and returns values only, and no collection appears in it. The classes of a matcher are a fold: start from \code{\verb~|whole()~} and \code{\verb~|refine~} with each set met while walking the regex trees of the rules. \code{\verb~|ClassSet~} is the matcher's own type, a set of class numbers; it is how a set node and a loop set are held once the classes are known.}
+
+\p{When a state is created, the matcher computes the classes on which the state loops to itself and asks the alphabet for a run. In the loop it calls \code{\verb~|skip~} for a state that has one. An alphabet that returns no run is matched one unit at a time, and nothing else changes. A skip must return a position where a unit starts.}
 
 \p{\code{\verb~|Bytes~} gives a run in two forms. Vector code cannot be generated per regex the way Paguroidea generates it at compile time, so its shape is fixed and its constants are data.}
 
@@ -414,18 +422,22 @@ bytes(S) = the ASCII characters of S, as bytes
 \subtree[design-regex-derivatives-interface]{
 \title{Interface sketch}
 
-\pre{\verb~|
-import std::regex::{Regex, Bytes, Rule, Lexer};
+\p{Every value here is immutable; each call returns a new value. No collection is part of the interface: rules are added one at a time, and matches are consumed by a fold.}
 
-let lower  = Regex::<Bytes>::range(97, 122);
-let digit  = Regex::<Bytes>::range(48, 57);
-let rules = Vec::new()
-    .push(Rule::new(lower.plus(), Token::Ident))
-    .push(Rule::new(digit.plus(), Token::Number))
-    .push(Rule::skip(Regex::<Bytes>::byte(32).plus()));
-let lexer = Lexer::new(rules);
+\pre{\verb~|
+import std::regex::{Regex, Bytes, Rules, Lexer};
+
+let lower = Regex::<Bytes>::range(97, 122);
+let digit = Regex::<Bytes>::range(48, 57);
+let space = Regex::<Bytes>::byte(32);
 
 // Data as actions: the caller dispatches.
+let lexer = Rules::new()
+    .rule(lower.plus(), Token::Ident)
+    .rule(digit.plus(), Token::Number)
+    .skip(space.plus())
+    .lexer();
+
 let (lexer, source, found) = lexer.next(source);       // Some(Match { start: 0, length: 3, rule: 0, .. })
 match found {
     Some(m) => match lexer.action(m) { Token::Ident => ..., Token::Number => ... },
@@ -433,13 +445,21 @@ match found {
 }
 
 // Functions as actions: the matcher dispatches, over all matches.
-let count = Lexer::new(Vec::new()
-    .push(Rule::new(lower.plus(), |n: u64, text: Window| n + 1))
-    .push(Rule::skip(Regex::<Bytes>::byte(32).plus())));
-let (count, words) = count.fold(source, 0);
+let counter = Rules::new()
+    .rule(lower.plus(), |words: u64, text: Window| words + 1)
+    .skip(space.plus())
+    .lexer();
+let (counter, words) = counter.fold(source, 0);
 ~}
 
-\p{Builder functions: \code{\verb~|empty~}, \code{\verb~|epsilon~}, \code{\verb~|set~}, \code{\verb~|byte~} or \code{\verb~|char~}, \code{\verb~|range~}, \code{\verb~|literal~}, \code{\verb~|then~}, \code{\verb~|or~}, \code{\verb~|and~}, \code{\verb~|not~}, \code{\verb~|star~}, \code{\verb~|plus~}, \code{\verb~|optional~}.}
+\table{
+\tr{\th{Value}\th{Made by}\th{Used by}}
+\tr{\td{\code{\verb~|Regex<A>~}}\td{\code{\verb~|empty~}, \code{\verb~|epsilon~}, \code{\verb~|set~}, \code{\verb~|byte~} or \code{\verb~|char~}, \code{\verb~|range~}, \code{\verb~|literal~}; and from regexes: \code{\verb~|then~}, \code{\verb~|or~}, \code{\verb~|and~}, \code{\verb~|not~}, \code{\verb~|star~}, \code{\verb~|plus~}, \code{\verb~|optional~}}\td{\code{\verb~|rule~}, \code{\verb~|skip~}}}
+\tr{\td{\code{\verb~|Rules<A, T>~}}\td{\code{\verb~|Rules::new()~}, then \code{\verb~|rule(regex, action)~} and \code{\verb~|skip(regex)~}}\td{\code{\verb~|lexer()~}}}
+\tr{\td{\code{\verb~|Lexer<A, T>~}}\td{\code{\verb~|rules.lexer()~}}\td{\code{\verb~|next~}, \code{\verb~|action~}, \code{\verb~|rules~}, \code{\verb~|fold~}, \code{\verb~|matches~}, \code{\verb~|complete~}}}
+}
+
+\p{\code{\verb~|fold~} is the general way to consume matches: \code{\verb~|lexer.fold(source, state)~} with functions as actions, or \code{\verb~|lexer.fold_matches(source, state, step)~} with a function \code{\verb~|step~} from a state and a \code{\verb~|Match~} for any action type. \code{\verb~|matches~} is \code{\verb~|fold_matches~} that builds a list.}
 }
 
 \subtree[design-regex-derivatives-open]{
