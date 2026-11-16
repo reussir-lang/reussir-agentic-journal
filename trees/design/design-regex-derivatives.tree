@@ -1,0 +1,196 @@
+\title{A derivative-based regex engine for Reussir}
+\taxon{Design}
+\date{2026-11-16}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{design}
+\tag{stdlib}
+\tag{regex}
+\meta{status}{draft}
+\meta{created}{2026-11-16}
+\import{base-macros}
+
+\p{\strong{Status:} draft, for discussion. Nothing is implemented.}
+
+\p{A regex engine written in Reussir whose automaton is built from Brzozowski derivatives when the program runs. Its design follows Paguroidea, a lexer generator that builds its automaton when the program is compiled, and replaces each compile-time device of Paguroidea by a run-time one.}
+
+\subtree[design-regex-derivatives-scope]{
+\title{What the first version covers}
+
+\ul{
+\li{A regex is built with a tree builder. Parsing a pattern string is left to a later version.}
+\li{The input alphabet is a parameter: bytes or characters.}
+\li{A matcher holds a list of rules, each a regex with an action value, and returns the action of the rule that wins. This is the lexer form of Paguroidea: longest match, the earliest rule on a tie, anchored at the current position.}
+\li{Transitions are held in a lookup table built at run time, with vector acceleration for the states that loop on themselves.}
+}
+
+\p{Left to later versions: a pattern parser, search for a match anywhere in the input, captures, lookaround, counted repetition beyond what the builder expands, and Unicode property tables.}
+}
+
+\subtree[design-regex-derivatives-example]{
+\title{A worked example}
+
+\p{Three rules over bytes:}
+
+\pre{\verb~|
+ident  = [a-z]+        action: Token::Ident
+number = [0-9]+        action: Token::Number
+space  = ' '+          action: Token::Space
+~}
+
+\p{\strong{Classes.} The sets the rules mention are \code{\verb~|[a-z]~}, \code{\verb~|[0-9]~} and \code{\verb~|' '~}. They split the 256 bytes into four classes that no rule can tell apart: \code{\verb~|0 = [a-z]~}, \code{\verb~|1 = [0-9]~}, \code{\verb~|2 = ' '~}, \code{\verb~|3 = everything else~}. A table of 256 entries maps a byte to its class.}
+
+\p{\strong{States.} A state is one regex per rule. The start state is \code{\verb~|([a-z]+, [0-9]+, ' '+)~}. The derivative of a regex \code{\verb~|r~} by a class is a regex for what may follow one byte of that class. Deriving the start state by class 0 gives \code{\verb~|([a-z]*, ∅, ∅)~}, where \code{\verb~|∅~} matches nothing; its first component accepts the empty string, so the state accepts with the rule \code{\verb~|ident~}. Deriving that state by class 0 again gives the same state.}
+
+\table{
+\tr{\th{State}\th{regexes}\th{accepts}\th{class 0}\th{class 1}\th{class 2}\th{class 3}}
+\tr{\td{0}\td{\code{\verb~|([a-z]+, [0-9]+, ' '+)~}}\td{}\td{1}\td{2}\td{3}\td{dead}}
+\tr{\td{1}\td{\code{\verb~|([a-z]*, ∅, ∅)~}}\td{ident}\td{1}\td{dead}\td{dead}\td{dead}}
+\tr{\td{2}\td{\code{\verb~|(∅, [0-9]*, ∅)~}}\td{number}\td{dead}\td{2}\td{dead}\td{dead}}
+\tr{\td{3}\td{\code{\verb~|(∅, ∅, ' '*)~}}\td{space}\td{dead}\td{dead}\td{3}\td{dead}}
+}
+
+\p{\strong{Matching \code{\verb~|abc 42~}.} State 0, byte \code{\verb~|a~} is class 0, go to state 1, which accepts \code{\verb~|ident~}: remember "ident, length 1". \code{\verb~|b~}, \code{\verb~|c~} stay in state 1: "ident, length 3". The space leads to the dead state, so the answer is the last one remembered: the action of \code{\verb~|ident~}, 3 bytes.}
+
+\p{\strong{Acceleration.} State 1 loops on itself for class 0 and leaves on every other byte. Its loop is one range, so the matcher can test 16 or more bytes at once with \code{\verb~|(b >= 'a') & (b <= 'z')~} on a vector and take \code{\verb~|first_set~} of the complement to find where the run ends. This is what Paguroidea emits as code for such a state; here the two bounds are data stored with the state.}
+}
+
+\subtree[design-regex-derivatives-decisions]{
+\title{Design decisions}
+
+\subtree[design-regex-derivatives-normalization]{
+\title{1. Regexes are normalized when they are constructed}
+
+\p{Paguroidea derives a plain tree and normalizes it in a separate pass, and compares states as whole trees. The engines that build automata at run time (the .NET non-backtracking engine, RE\verb~|#~, derivre, the LLVM libc matcher) all do the opposite: every regex node is made by a constructor that applies the rewrite rules and looks the result up in a table of existing nodes, so equal regexes are the same node.}
+
+\p{Chosen: constructors with a node table. A node is a small integer.}
+
+\ul{
+\li{Equality and hashing of a state are operations on integers, not on trees.}
+\li{Each node stores whether it accepts the empty string, computed once.}
+\li{The rules are those Paguroidea applies in its pass: union and intersection as sorted lists without duplicates (which makes them associative, commutative and idempotent), the unit and zero laws, \code{\verb~|(r*)* = r*~}, \code{\verb~|¬¬r = r~}, and merging of the character sets inside one union or intersection.}
+}
+
+\p{The tree the caller builds is separate from these nodes: it is an ordinary value with no table behind it, so building a regex needs no state. Compiling a list of rules turns the trees into nodes.}
+
+\p{Not in the first version: the further rules of RE\verb~|#~ (factoring \code{\verb~|ab|ac~} into \code{\verb~|a(b|c)~}, absorption, merging of counted loops) and the subsumption tests of .NET. They reduce the number of states for some patterns and can be added to the constructors later without changing anything else.}
+}
+
+\subtree[design-regex-derivatives-alphabet]{
+\title{2. The alphabet is a trait}
+
+\p{Everything the engine does after mapping an input unit to its class is the same for bytes and characters. So the alphabet is a trait with two implementations, and the regex tree, the node table and the matcher are generic in it.}
+
+\pre{\verb~|
+pub trait Alphabet {
+    /// A set of units, as the builder takes it.
+    type Set;
+    /// The map from a unit to its class, built from the sets of all rules.
+    type Classes;
+    ...
+}
+pub struct Bytes;   // units are u8; a set is 256 bits; the map is 256 entries
+pub struct Chars;   // units are char; a set is a sorted list of ranges
+~}
+
+\ul{
+\li{\code{\verb~|Bytes~}: a set is four 64-bit words. The class map is a table of 256 bytes.}
+\li{\code{\verb~|Chars~}: the input is still UTF-8, decoded one character at a time. A set is a sorted list of ranges. The class map is a table for the ASCII characters and a binary search over the range bounds for the rest.}
+}
+
+\p{The classes are computed once for all rules of a matcher, by refining a partition with each set the rules mention (as .NET and RE\verb~|#~ do). Paguroidea computes classes per state, which suits generated code but not one table indexed by state and class.}
+
+\p{The vector acceleration of decision 5 works on bytes. With \code{\verb~|Chars~} it applies only where a state's loop set is within ASCII.}
+}
+
+\subtree[design-regex-derivatives-actions]{
+\title{3. A state is a vector of regexes, and a match returns an action value}
+
+\p{As in Paguroidea, a state holds one node per rule, and a state accepts with the first rule whose node accepts the empty string. The matcher is generic in the type \code{\verb~|T~} of the action values:}
+
+\pre{\verb~|
+pub struct Rule<A: Alphabet, T> { regex: Regex<A>, action: T }
+pub struct Match<T> { length: u64, action: T }
+~}
+
+\p{\code{\verb~|T~} is any type: a token kind, a number, or a function that the caller applies to the matched text. Paguroidea splices the action in as code; at run time the winning rule is an index, and the matcher returns the value stored at that index.}
+
+\p{A single regex is the case of one rule whose action is the unit value.}
+}
+
+\subtree[design-regex-derivatives-table]{
+\title{4. Transitions live in one table filled on demand}
+
+\pre{\verb~|
+class_of[byte]                       -> class
+next[state * classes + class]        -> state, or "not computed yet"
+accepting[state]                     -> rule index, or none
+~}
+
+\p{The table starts with the start state only. Reaching an entry that is not computed takes the derivative of that state by that class, finds or adds the resulting state, and stores it. A fixed state stands for "no rule can match any more".}
+
+\p{Reussir values are not mutated behind the caller's back, so a matcher that fills its table is passed in and returned:}
+
+\pre{\verb~|
+let (lexer, token) = lexer.next(text, position);
+~}
+
+\p{When the caller holds the only reference, the update happens in place.}
+
+\p{A second entry point completes the table for every reachable state and returns a matcher that never changes, for callers that want to share one. It stops with an error above a state limit, since some regexes have exponentially many states.}
+}
+
+\subtree[design-regex-derivatives-simd]{
+\title{5. Vector acceleration, and one operation \code{\verb~|core::simd~} lacks}
+
+\p{When a state is created, the matcher computes the set of bytes on which it loops to itself. If the state has such a loop, it chooses an accelerator:}
+
+\table{
+\tr{\th{Loop set or its complement}\th{Accelerator}\th{Needs}}
+\tr{\td{a few single bytes and ranges (Paguroidea's bound: cost 4, one per byte, two per range)}\td{compare each chunk with \code{\verb~|splat~} of the bounds, combine with \code{\verb~|&~} and `}\td{\code{\verb~|, ~}first_set`}}
+\tr{\td{any other set}\td{test membership with two 16-entry tables held in vector registers, indexed by the low and the high half of each byte}\td{a shuffle whose indices are a run-time vector}}
+\tr{\td{any other set, scalar}\td{one table of 256 bits}\td{available today}}
+}
+
+\p{The second row is the run-time form of a lookup table in a register. \code{\verb~|core::simd::shuffle~} takes its picks as a constant sequence; x86 \code{\verb~|pshufb~}, AArch64 \code{\verb~|tbl~} and RISC-V \code{\verb~|vrgather~} take them from a vector, and LLVM has no target-independent operation for that. Adding one to \code{\verb~|core::simd~} is a separate change to the compiler, to be designed before this row is implemented. The same operation would allow running a whole automaton of at most 16 states as one shuffle per byte.}
+
+\p{The first version uses rows one and three.}
+}
+
+\subtree[design-regex-derivatives-home]{
+\title{6. Where it lives}
+
+\p{A module \code{\verb~|std::regex~}, with nothing in the compiler apart from the shuffle of decision 5.}
+}
+}
+
+\subtree[design-regex-derivatives-interface]{
+\title{Interface sketch}
+
+\pre{\verb~|
+import std::regex::{Regex, Bytes, Rule, Lexer};
+
+let lower  = Regex::<Bytes>::range(97, 122);
+let digit  = Regex::<Bytes>::range(48, 57);
+let rules = Vec::new()
+    .push(Rule::new(lower.plus(), Token::Ident))
+    .push(Rule::new(digit.plus(), Token::Number))
+    .push(Rule::new(Regex::<Bytes>::byte(32).plus(), Token::Space));
+let lexer = Lexer::new(rules);
+
+let (lexer, token) = lexer.next(text, 0);     // Some(Match { length: 3, action: Token::Ident })
+~}
+
+\p{Builder functions: \code{\verb~|empty~}, \code{\verb~|epsilon~}, \code{\verb~|set~}, \code{\verb~|byte~} or \code{\verb~|char~}, \code{\verb~|range~}, \code{\verb~|literal~}, \code{\verb~|then~}, \code{\verb~|or~}, \code{\verb~|and~}, \code{\verb~|not~}, \code{\verb~|star~}, \code{\verb~|plus~}, \code{\verb~|optional~}.}
+}
+
+\subtree[design-regex-derivatives-open]{
+\title{Open questions}
+
+\ul{
+\li{Whether intersection and complement belong in the first version. Paguroidea has them. With them a state can match nothing without being the node \code{\verb~|∅~}, so recognizing that no rule can match any more needs an emptiness test.}
+\li{Whether the first version fills the table on demand, or builds it completely as Paguroidea does and adds filling on demand later.}
+\li{How \code{\verb~|Chars~} reads its input, and whether a \code{\verb~|Bytes~} regex may contain characters outside ASCII by expansion into UTF-8 sequences, as Paguroidea's front end does.}
+\li{What happens at the state limit: an error, or dropping the table and starting it again.}
+}
+}
