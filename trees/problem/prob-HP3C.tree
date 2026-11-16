@@ -5,11 +5,12 @@
 \contributor{schrodingerzy}
 \tag{compiler}
 \tag{simd}
-\meta{status}{open}
+\meta{status}{closed}
+\meta{completed}{2026-11-16}
 \meta{created}{2026-11-16}
 \import{base-macros}
 
-\p{\strong{Status:} open; a fix is in review as \pr{1040}.}
+\p{\strong{Status:} closed by \pr{1040}.}
 
 \p{\code{\verb~|core::simd::extract~} is documented to take a computed index into the last dimension. For \code{\verb~|wasm32-wasip1~} such a call fails in the last step of code generation. Found while trying a vector of four 64-bit words as the representation of \code{\verb~|std::regex::alphabet::bits::Bits~} for \pr{1039}: the standard library then no longer builds for WebAssembly.}
 
