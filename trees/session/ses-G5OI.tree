@@ -21,6 +21,6 @@
 }
 \p{\strong{Review of \pr{999}.} The lowering of an operator had a fallback arm for a wrong number of operands, marked unreachable. The checker rejects every such call in source, on scalars, on vectors and in generic code. The arm was removed all the same by holding the operands of an operation as an array of one or two, so the count is part of the type.}
 \p{\strong{CI.} \pr{1010}, which ran the whole stack against the main branch, was closed: it held the stack as it was before the merged parts were revised. Each remaining pull request is rebased onto the main branch before review and gets CI there.}
-\p{\strong{In review.} \pr{1000} is rebased onto the main branch; its optional mask argument became the \code{\verb~|_masked~} functions.}
-\p{\strong{Left.} \pr{1011}, \pr{1001} to \pr{1006} and \pr{1008} are still drafts on the old history.}
+\p{\strong{In review.} \pr{1000} is rebased onto the main branch; its optional mask argument became the \code{\verb~|_masked~} functions. \pr{1011} was folded into it and closed, so that the reduction it replaced for \code{\verb~|first_set~} on a scalable mask is never added. On a fixed mask the bit cast and count of trailing zeros stays: for 16 lanes it is three instructions on AVX2, where \code{\verb~|llvm.experimental.cttz.elts~} takes nine and a constant load; on SVE the intrinsic is three instructions where the reduction took 25. Measured with \code{\verb~|llc~} of LLVM 23.1.}
+\p{\strong{Left.} \pr{1001} to \pr{1006} and \pr{1008} are still drafts on the old history.}
 \p{Not verified in this session: the tests that need OpenXLA or the big-integer runtime do not run on the development machine, 160 of 989; CI ran them.}
