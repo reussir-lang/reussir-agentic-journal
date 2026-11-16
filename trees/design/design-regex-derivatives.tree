@@ -311,7 +311,7 @@ pub trait Source {
 
 \p{A \code{\verb~|Text~}, literal or owned, is a source that holds all of it and never extends. The text of a match is the first \code{\verb~|length~} bytes of \code{\verb~|held()~}, a range of that \code{\verb~|Text~}. A buffered reader keeps the bytes of the current token in a string and appends to them; its views share that string. The source does not depend on the alphabet.}
 
-\p{A view of an owned string shares it. If an action keeps such a view and the reader then needs to append, the string is no longer held by the reader alone, and the reader continues in a new string with the bytes not yet consumed. An action that only reads the view and lets it go costs nothing.}
+\p{A view of an owned string shares it. If an action keeps such a view and the reader then needs to append, the string is no longer held by the reader alone, and the reader continues in a new string with the bytes not yet consumed. An action that only reads the view and lets it go costs nothing. This cost is accepted: it is what sharing means, and it is paid only by an action that keeps a view.}
 
 \p{\code{\verb~|next~} is then:}
 
