@@ -1,0 +1,42 @@
+\title{\code{\verb~|simd::extract~} with a computed index does not compile for a 32-bit target}
+\taxon{Problem}
+\date{2026-11-16}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{compiler}
+\tag{simd}
+\meta{status}{open}
+\meta{created}{2026-11-16}
+\import{base-macros}
+
+\p{\strong{Status:} open; the cause is located, no fix is written.}
+
+\p{\code{\verb~|core::simd::extract~} is documented to take a computed index into the last dimension. For \code{\verb~|wasm32-wasip1~} such a call fails in the last step of code generation. Found while trying a vector of four 64-bit words as the representation of \code{\verb~|std::regex::alphabet::bits::Bits~} for \pr{1039}: the standard library then no longer builds for WebAssembly.}
+
+\p{\strong{Demonstration.}}
+
+\pre{\verb~|
+import core::simd;
+
+pub fn lane(v: Simd<[u64; 4]>, index: u64) -> u64 {
+    simd::extract(v, index)
+}
+~}
+
+\pre{\verb~|
+rrc lane.rr --package-name repro --extern core=core.rri --target-triple wasm32-wasip1 --emit llvm-ir -o lane.ll
+error: LLVM Translation failed for operation: builtin.unrealized_conversion_cast
+~}
+
+\p{The same file compiles for \code{\verb~|x86_64-unknown-linux-gnu~}. An index that is a literal compiles for both. With \code{\verb~|--emit mlir-llvm~} the function is left as:}
+
+\pre{\verb~|
+%0 = llvm.trunc %arg1 : i64 to i32
+%1 = builtin.unrealized_conversion_cast %0 : i32 to index
+%2 = builtin.unrealized_conversion_cast %1 : index to i64
+%3 = llvm.extractelement %arg0[%2 : i64] : vector<4xi64>
+~}
+
+\p{\strong{Cause.} Two conversions disagree on the width of \code{\verb~|index~}. Reussir's own lowering takes it from the data layout, 32 bits where pointers are 32 bits (\code{\verb~|buildLowerOptions~} in \code{\verb~|lib/Conversion/TypeConverter/TypeConverter.cpp~}), so \code{\verb~|arith.index_castui~} becomes a truncation to \code{\verb~|i32~}. The upstream \code{\verb~|convert-vector-to-llvm~} pass is created with its default options in \code{\verb~|reussirCreateConvertVectorToLLVMPass~} (\code{\verb~|lib/CAPI/Passes.cpp~}), builds its own type converter with a 64-bit \code{\verb~|index~}, and lowers the position of \code{\verb~|vector.extract~} to \code{\verb~|i64~}. The two casts between them do not cancel.}
+
+\p{\strong{Direction for a fix.} The pass options of \code{\verb~|convert-vector-to-llvm~} have no index width. The vector patterns can be populated with the type converter the rest of the lowering uses, in a pass of Reussir's own, so every conversion reads one width.}

@@ -130,6 +130,36 @@ the classes it leaves     0 → 0,    61 → 1,   7B → 0,    3B1 → 1,   3CA 
 \p{To know which classes a set cuts, the classes keep the number of characters in each class. A class is cut when fewer of its characters are inside the set than it has; its part inside takes the next free number, so the numbers stay without gaps and no class is renumbered. Surrogates and numbers above U+10FFFF are in no set and in no class.}
 
 \p{The classes of \code{\verb~|Bytes~} are a list of at most 256 disjoint sets of 256 bits each.}
+
+\p{\strong{Other representations of \code{\verb~|Bits~}, measured.} Two were tried against the four \code{\verb~|u64~} words: two \code{\verb~|u128~} words, and one \code{\verb~|Simd<[u64; 4]>~} with membership and the single-member set written directly on the vector. Instructions of each function compiled alone, for x86-64 without extensions and for \code{\verb~|x86-64-v3~}:}
+
+\table{
+\tr{\th{Function}\th{4 × u64}\th{2 × u128}\th{Simd}\th{4 × u64, v3}\th{2 × u128, v3}\th{Simd, v3}}
+\tr{\td{union, intersection}\td{10}\td{10}\td{3}\td{10}\td{10}\td{2}}
+\tr{\td{difference}\td{17}\td{17}\td{5}\td{13}\td{15}\td{2}}
+\tr{\td{is empty}\td{5}\td{5}\td{7}\td{5}\td{5}\td{4}}
+\tr{\td{number of members}\td{68}\td{68}\td{36}\td{9}\td{10}\td{17}}
+\tr{\td{smallest member}\td{19}\td{17}\td{24}\td{16}\td{16}\td{24}}
+\tr{\td{range}\td{67}\td{65}\td{148}\td{62}\td{61}\td{30}}
+\tr{\td{one member}\td{66}\td{63}\td{18}\td{61}\td{59}\td{11}}
+\tr{\td{membership}\td{72}\td{73}\td{13}\td{68}\td{69}\td{18}}
+\tr{\td{equality}\td{11}\td{16}\td{7}\td{11}\td{15}\td{5}}
+}
+
+\p{Time against the four \code{\verb~|u64~} words, median of 7 runs:}
+
+\table{
+\tr{\th{Workload}\th{2 × u128}\th{Simd}\th{2 × u128, v3}\th{Simd, v3}}
+\tr{\td{ranges and every operation mixed}\td{0.91}\td{0.71}\td{0.79}\td{0.26}}
+\tr{\td{bitwise operations in a loop}\td{1.16}\td{1.02}\td{1.31}\td{1.16}}
+\tr{\td{ranges}\td{0.87}\td{0.65}\td{0.81}\td{0.16}}
+\tr{\td{membership of random numbers}\td{0.40}\td{0.12}\td{0.37}\td{0.10}}
+\tr{\td{sets built one member at a time}\td{0.78}\td{0.17}\td{0.76}\td{0.14}}
+\tr{\td{equality}\td{0.90}\td{0.59}\td{0.94}\td{0.58}}
+\tr{\td{classes of bytes: refine with 24 ranges, then inside}\td{0.99}\td{1.06}\td{1.01}\td{1.05}}
+}
+
+\p{A \code{\verb~|u128~} is two 64-bit registers, so the bitwise functions are the same instructions; ranges clip two words where four were clipped and are somewhat faster, and equality is longer. The vector is two to ten times faster wherever a set is built or tested, and 5 to 6 percent slower in the classes of bytes, where the smallest member is asked for often. The vector is the better fit, and it is not used yet: membership and the smallest member take a lane by a computed index, which does not compile for a 32-bit target, see [prob-HP3C](prob-HP3C). The bitwise loop varies by a quarter between builds of the same code and decides nothing.}
 }
 
 \subtree[design-regex-derivatives-actions]{
