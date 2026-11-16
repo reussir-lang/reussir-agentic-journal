@@ -114,10 +114,12 @@ pub struct Match { start: u64, length: u64, rule: u32, accept: u32 }
 \tr{\th{Call}\th{Gives}\th{Use}}
 \tr{\td{\code{\verb~|lexer.next(source)~}}\td{the next \code{\verb~|Match~}}\td{the caller decides what to do with it}}
 \tr{\td{\code{\verb~|lexer.action(m)~}}\td{the value of type \code{\verb~|T~} stored for \code{\verb~|m.rule~}}\td{\code{\verb~|T~} is data, such as a token kind: the caller dispatches with \code{\verb~|match~}}}
-\tr{\td{\code{\verb~|lexer.fold(source, state)~}}\td{the final state}\td{\code{\verb~|T~} is a function from a state and the matched bytes to a new state: the matcher calls the action of every match in turn}}
+\tr{\td{\code{\verb~|lexer.fold(source, state)~}}\td{the final state}\td{\code{\verb~|T~} is a function from a state and a view of the matched text to a new state: the matcher calls the action of every match in turn}}
 }
 
-\p{\code{\verb~|fold~} is the dispatch form: each rule's function is called as its rule matches, and the state it threads can collect every match. A list of all matches is a fold that appends; \code{\verb~|lexer.matches(source)~} is that, for any \code{\verb~|T~}.}
+\p{\code{\verb~|fold~} is the dispatch form: each rule's function is called as its rule matches, and the state it threads can collect every match.}
+
+\p{An action is given the matched text as a \code{\verb~|TextView~} of the standard library: a range of bytes together with the \code{\verb~|Text~} it lies in. The \code{\verb~|Text~} says who owns the bytes: \code{\verb~|Literal~} for a string literal, which nothing needs to keep alive, or \code{\verb~|Owned~} for a string, which the view shares. So a view stays valid for as long as the action or its state keeps it, whatever the matcher does next, and the action can tell which case it has from \code{\verb~|view.base()~}. The pointer and length the matcher itself reads through are never given to an action. A list of all matches is a fold that appends; \code{\verb~|lexer.matches(source)~} is that, for any \code{\verb~|T~}.}
 
 \p{A rule may be marked as skipped, for white space and comments: \code{\verb~|next~} goes on to the following match, and \code{\verb~|fold~} does not call an action for it.}
 
@@ -214,7 +216,7 @@ pub enum Unit { Class(u32, u64), Incomplete, Malformed }
 \subtree[design-regex-derivatives-window]{
 \title{The window}
 
-\p{The matcher reads input through a window: a pointer to the first byte and a number of bytes.}
+\p{The matcher reads input through a window: a pointer to the first byte and a number of bytes. A window is valid only while the source that gave it is held and unchanged, so it is used between the matcher and the alphabet during one scan and is not part of what a caller sees: positions go out as numbers in a \code{\verb~|Match~}, and text goes out as a \code{\verb~|TextView~}.}
 
 \pre{\verb~|
 pub struct Window { base: ConstPtr<Generic>, len: u64 }      // len in bytes
@@ -287,8 +289,11 @@ fn skip(lo: u8, hi: u8, base: ConstPtr<Generic>, at: u64, len: u64) -> u64 {
 
 \pre{\verb~|
 pub trait Source {
-    /// The bytes held from the start of the current token on.
+    /// The bytes held from the start of the current token on. Valid until the
+    /// next call on the source.
     fn window(self: Self) -> Window;
+    /// The first `length` of those bytes as a view that shares their owner.
+    fn view(self: Self, length: u64) -> TextView;
     /// Read more bytes after those held, keeping them. False at the end of input.
     fn extend(self: Self) -> (Self, bool);
     /// Drop the first `count` bytes: a token was returned.
@@ -296,7 +301,9 @@ pub trait Source {
 }
 ~}
 
-\p{A \code{\verb~|String~}, a \code{\verb~|Text~} or a \code{\verb~|Vec~} of bytes is a source whose window is all of it and which never extends. A buffered reader keeps the bytes of the current token and appends to them. The source does not depend on the alphabet.}
+\p{A \code{\verb~|Text~}, literal or owned, is a source whose window is all of it and which never extends; its views are ranges of that \code{\verb~|Text~}. A buffered reader keeps the bytes of the current token in a string and appends to them; its views share that string. The source does not depend on the alphabet.}
+
+\p{A view of an owned string shares it. If an action keeps such a view and the reader then needs to append, the string is no longer held by the reader alone, and the reader continues in a new string with the bytes not yet consumed. An action that only reads the view and lets it go costs nothing.}
 
 \p{\code{\verb~|next~} is then:}
 
@@ -446,7 +453,7 @@ match found {
 
 // Functions as actions: the matcher dispatches, over all matches.
 let counter = Rules::new()
-    .rule(lower.plus(), |words: u64, text: Window| words + 1)
+    .rule(lower.plus(), |words: u64, text: TextView| words + 1)
     .skip(space.plus())
     .lexer();
 let (counter, words) = counter.fold(source, 0);
@@ -459,7 +466,7 @@ let (counter, words) = counter.fold(source, 0);
 \tr{\td{\code{\verb~|Lexer<A, T>~}}\td{\code{\verb~|rules.lexer()~}}\td{\code{\verb~|next~}, \code{\verb~|action~}, \code{\verb~|rules~}, \code{\verb~|fold~}, \code{\verb~|matches~}, \code{\verb~|complete~}}}
 }
 
-\p{\code{\verb~|fold~} is the general way to consume matches: \code{\verb~|lexer.fold(source, state)~} with functions as actions, or \code{\verb~|lexer.fold_matches(source, state, step)~} with a function \code{\verb~|step~} from a state and a \code{\verb~|Match~} for any action type. \code{\verb~|matches~} is \code{\verb~|fold_matches~} that builds a list.}
+\p{\code{\verb~|fold~} is the general way to consume matches: \code{\verb~|lexer.fold(source, state)~} with functions as actions, each from a state and a \code{\verb~|TextView~} to a state, or \code{\verb~|lexer.fold_matches(source, state, step)~} with a function \code{\verb~|step~} from a state, a \code{\verb~|Match~} and a \code{\verb~|TextView~} for any action type. \code{\verb~|matches~} is \code{\verb~|fold_matches~} that builds a list.}
 }
 
 \subtree[design-regex-derivatives-open]{
