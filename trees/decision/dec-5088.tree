@@ -1,0 +1,17 @@
+\title{A masked vector operation is a function of its own}
+\taxon{Decision}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\tag{simd}
+\meta{status}{accepted}
+\meta{created}{2026-11-15}
+\meta{completed}{2026-11-15}
+\import{base-macros}
+
+\p{\strong{Status:} accepted.}
+\p{\strong{Context.} The [design of predication](design-simd-vectors-predication) gave every lanewise function and comparison an optional last argument, a mask: \code{\verb~|simd::add(a, b)~} and \code{\verb~|simd::add(a, b, m)~}. The first version of \pr{1000} implemented that. The language has no optional parameters, so the declaration in \code{\verb~|core::simd~}, \code{\verb~|pub fn add<V>(a: V, b: V) -> V;~}, did not describe the calls that were accepted, and the error for a wrong count had to say that a mask was optional.}
+\p{\strong{Decision.} A masked operation has its own name and its own declaration, with the mask as the last parameter: \code{\verb~|add_masked(a, b, m)~}, \code{\verb~|lt_masked(a, b, m)~} and so on for the 22 lanewise functions and comparisons. The unmasked function takes no mask. In HIR and MIR a masked operation is its own intrinsic, \code{\verb~|intrinsic#simd#add_masked#0~}. \pr{1000}.}
+\p{\strong{What a masked operation adds.} Its lowering is the operation followed by a select, so \code{\verb~|add_masked(a, b, m)~} compiles to the same MLIR as \code{\verb~|select(m, a + b, a)~} and \code{\verb~|lt_masked(a, b, m)~} to the same as \code{\verb~|lt(a, b) & m~}. The masked integer division and remainder also replace the divisor of the masked lanes by one, which a caller would otherwise write out.}
+\p{\strong{Consequences.} The same holds for what follows in the stack: a reduction or a memory operation that takes a mask is a function of its own and not an optional argument. A function whose number of arguments follows the type, such as \code{\verb~|mask_first<M>(n...)~} with one count per dimension, is a separate question and is not settled here.}

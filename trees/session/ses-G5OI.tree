@@ -13,7 +13,7 @@
 \p{The stack of draft pull requests for [SIMD vectors](design-simd-vectors) was reviewed with the maintainer one pull request at a time: each was rebased onto the main branch, changed where review asked for it, and merged by the maintainer or on their word. This tree covers the part from the operators on.}
 \ul{
 \li{\strong{Merged.} \pr{1036} adds the impl target \code{\verb~|Simd<[T; ..]>~}. \pr{999} gives vectors the operator traits. \pr{1037} lets a trait method be called with the dot on a vector.}
-\li{\strong{Decision recorded.} [dec-6NAW](dec-6NAW), the spelling of the impl target and the alternatives.}
+\li{\strong{Decisions recorded.} [dec-6NAW](dec-6NAW), the spelling of the impl target and the alternatives. [dec-5088](dec-5088), masked operations as functions of their own.}
 \li{\strong{Insight.} [ins-YAS4](ins-YAS4), on the dot call that the new impls did not reach.}
 \li{\strong{Changelog.} [log-TFAN](log-TFAN) and [log-BMC9](log-BMC9).}
 \li{\strong{Policy recorded.} Type checking is the boundary, in [standing policies](standing-policies).}
@@ -21,5 +21,6 @@
 }
 \p{\strong{Review of \pr{999}.} The lowering of an operator had a fallback arm for a wrong number of operands, marked unreachable. The checker rejects every such call in source, on scalars, on vectors and in generic code. The arm was removed all the same by holding the operands of an operation as an array of one or two, so the count is part of the type.}
 \p{\strong{CI.} \pr{1010}, which ran the whole stack against the main branch, was closed: it held the stack as it was before the merged parts were revised. Each remaining pull request is rebased onto the main branch before review and gets CI there.}
-\p{\strong{Left.} \pr{1000}, \pr{1011}, \pr{1001} to \pr{1006} and \pr{1008} are still drafts on the old history.}
+\p{\strong{In review.} \pr{1000} is rebased onto the main branch; its optional mask argument became the \code{\verb~|_masked~} functions.}
+\p{\strong{Left.} \pr{1011}, \pr{1001} to \pr{1006} and \pr{1008} are still drafts on the old history.}
 \p{Not verified in this session: the tests that need OpenXLA or the big-integer runtime do not run on the development machine, 160 of 989; CI ran them.}

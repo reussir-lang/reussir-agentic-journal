@@ -78,11 +78,11 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \title{Predication}
 
 \ul{
-\li{Every lanewise operation, comparison and reduction takes an optional last argument, a mask of the same shape. Without it all lanes take part.}
+\li{Every lanewise operation and comparison has a masked form of its own, named with the suffix \code{\verb~|_masked~} and taking a mask of the same shape as its last argument, \code{\verb~|add_masked(a, b, m)~}. The plain function takes no mask and all lanes take part. See [dec-5088](dec-5088), which replaced an optional last argument. Masked reductions are to follow the same rule.}
 \li{A lane that is masked off in a lanewise operation keeps the lane of the first operand. In a comparison it is false. In a reduction it does not contribute. Zeroing instead of merging is \code{\verb~|select(m, op(a, b), splat(0))~}.}
 \li{A masked lane never traps and never touches memory. Integer division and remainder replace the divisor of masked lanes by one before dividing.}
 \li{Lowering does not use \code{\verb~|vector.mask~}: upstream lowers that region for a few operations only. A pure lanewise operation becomes the operation followed by \code{\verb~|arith.select~}; a reduction selects the identity of its kind first; memory operations use the masked LLVM intrinsics. Instruction selection turns the select into merging predication where the target has it: a select followed by a reduction compiles to \code{\verb~|sel~} and \code{\verb~|fadda~} on SVE and to \code{\verb~|vmerge~} and \code{\verb~|vfredosum~} on RVV.}
-\li{Masks are built by comparisons and by \code{\verb~|mask_first<M>(n...)~}, whose leading \code{\verb~|n~} lanes are set (\code{\verb~|vector.create_mask~}; \code{\verb~|whilelt~} on SVE). They combine with \code{\verb~|and~}, \code{\verb~|or~}, \code{\verb~|xor~} and \code{\verb~|not~}, and with the operators \code{\verb~|& | ^ !~}. In HIR and MIR the mask of an operation is simply its last operand.}
+\li{Masks are built by comparisons and by \code{\verb~|mask_first<M>(n...)~}, whose leading \code{\verb~|n~} lanes are set (\code{\verb~|vector.create_mask~}; \code{\verb~|whilelt~} on SVE). They combine with \code{\verb~|and~}, \code{\verb~|or~}, \code{\verb~|xor~} and \code{\verb~|not~}, and with the operators \code{\verb~|& | ^ !~}. In HIR and MIR a masked operation is its own intrinsic and the mask is its last operand.}
 }
 }
 
