@@ -85,12 +85,33 @@ space  = ' '+          action: Token::Space
 
 \ul{
 \li{\code{\verb~|Bytes~}: a unit is one byte. A set is 256 bits.}
-\li{\code{\verb~|Chars~}: a unit is one character, decoded from UTF-8 in the matching loop, one to four bytes. A set is a sorted list of ranges of code points.}
+\li{\code{\verb~|Chars~}: a unit is one character, decoded from UTF-8 in the matching loop, one to four bytes. A set is held as the code points where membership changes; see below.}
 }
 
 \p{Both read the same kind of input, so both can take it in pieces; see "Reading input" and "Characters".}
 
 \p{The classes are computed once for all rules of a matcher, by refining a partition with each set the rules mention (\code{\verb~|whole~} and \code{\verb~|refine~} of the trait), as .NET and RE\verb~|#~ do. Paguroidea computes classes per state, which suits generated code but not one table indexed by state and class.}
+
+\p{\strong{How sets and classes of characters are held.} A set of characters gives every code point one of two values, in or out; the classes give every code point a class number. Both are a value for every code point that changes at only a few of them, so both are held as the code points where the value changes, in a map ordered by code point: \code{\verb~|WavlMap<u32, V>~} of \code{\verb~|std::collections::pure~}. The entry \code{\verb~|(k, v)~} says the value is \code{\verb~|v~} from \code{\verb~|k~} up to the next key. ICU's \code{\verb~|UnicodeSet~} holds a set the same way, in a sorted array.}
+
+\pre{\verb~|
+[a-zα-ω] as a set         0 → out,  61 → in,  7B → out,  3B1 → in,  3CA → out
+the classes it leaves     0 → 0,    61 → 1,   7B → 0,    3B1 → 1,   3CA → 0, …
+~}
+
+\table{
+\tr{\th{Operation}\th{How}\th{Cost}}
+\tr{\td{is a character in a set}\td{the entry at or below its code point}\td{a logarithm of the number of changes}}
+\tr{\td{give a range one value}\td{remove the keys inside it, insert its two ends, drop an end where the value does not change}\td{a logarithm, and the keys removed}}
+\tr{\td{union, intersection, difference}\td{walk the set with fewer changes and give its ranges a value in the other}\td{the smaller set times a logarithm}}
+\tr{\td{refine the classes with a set}\td{make the bounds of the set keys, then look only at the ranges inside the set}\td{follows the size of the set, not the number of classes}}
+}
+
+\p{A sorted list of ranges does each of these by walking both operands, which is as good for two sets of similar size. The map is chosen for what happens when the rules of a matcher are walked: many small sets, each refining classes that keep growing, where a list would walk every class for every set.}
+
+\p{To know which classes a set cuts, the classes keep the number of characters in each class. A class is cut when fewer of its characters are inside the set than it has; its part inside takes the next free number, so the numbers stay without gaps and no class is renumbered. Surrogates and numbers above U+10FFFF are in no set and in no class.}
+
+\p{The classes of \code{\verb~|Bytes~} are a list of at most 256 disjoint sets of 256 bits each.}
 }
 
 \subtree[design-regex-derivatives-actions]{
@@ -200,7 +221,7 @@ pub trait Alphabet {
 pub enum Unit { Class(u32, u64), Incomplete, Malformed }
 ~}
 
-\p{The trait takes and returns values only, and no collection appears in it. The classes of a matcher are a fold: start from \code{\verb~|whole()~} and \code{\verb~|refine~} with each set met while walking the regex trees of the rules. \code{\verb~|ClassSet~} is the matcher's own type, a set of class numbers; it is how a set node and a loop set are held once the classes are known.}
+\p{The trait takes and returns values only, and no collection appears in it. The classes of a matcher are a fold: start from \code{\verb~|whole()~} and \code{\verb~|refine~} with each set met while walking the regex trees of the rules. \code{\verb~|ClassSet~} is the matcher's own type, a set of class numbers; it is how a set node and a loop set are held once the classes are known. In the first version it is 256 bits, the record that also holds a set of bytes, so a matcher has at most 256 classes.}
 
 \p{When a state is created, the matcher computes the classes on which the state loops to itself and asks the alphabet for a run. In the loop it calls \code{\verb~|skip~} for a state that has one. An alphabet that returns no run is matched one unit at a time, and nothing else changes. A skip must return a position where a unit starts.}
 
@@ -378,7 +399,7 @@ let (stream, matches) = stream.finish();         // the end of input
 \ol{
 \li{The byte is below \code{\verb~|80~}: the class comes from a table of 128 entries, the width is one. Text that is mostly ASCII takes this path.}
 \li{Otherwise the first byte gives the width. If the window ends before the last byte of the character, the answer is \code{\verb~|Incomplete~}.}
-\li{The code point is assembled and its class found by binary search in the sorted bounds of the classes.}
+\li{The code point is assembled and its class found by binary search in the sorted bounds of the classes. The bounds are the changes of the classes, written out in order when the matcher is built.}
 \li{A byte that cannot start a character, or a wrong continuation byte, is \code{\verb~|Malformed~}, which ends the match there.}
 }
 }
@@ -500,5 +521,6 @@ let words = counter.fold(source, 0);
 \li{Whether \code{\verb~|Chars~} skips from the first version on, or is matched one character at a time first.}
 \li{What \code{\verb~|Malformed~} should do for input that is not known to be UTF-8: end the match, as here, or count the byte as a unit of its own class.}
 \li{Whether "all matches" should also mean a search for one regex anywhere in the input. That needs an automaton for \code{\verb~|.*r~} and is left to a later version here.}
+\li{Whether 256 classes are enough for \code{\verb~|Chars~}, or the set of classes has to grow with the rules.}
 }
 }
