@@ -1,0 +1,13 @@
+\title{Trait methods called with the dot on a vector}
+\taxon{Change}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1037}
+\import{base-macros}
+
+\p{\code{\verb~|a.add(b)~} and \code{\verb~|x.neg()~} are accepted on a \code{\verb~|Simd~} vector and mean the same as \code{\verb~|a + b~} and \code{\verb~|-x~}. Before, the dot form was rejected with a field access error while \code{\verb~|Add::add(a, b)~} was accepted. See [ins-YAS4](ins-YAS4). \pr{1037}.}

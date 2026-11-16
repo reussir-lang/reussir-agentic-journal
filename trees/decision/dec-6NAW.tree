@@ -1,0 +1,29 @@
+\title{A builtin impl for vectors leaves the extents out with \code{\verb~|..~}}
+\taxon{Decision}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{language}
+\tag{traits}
+\tag{simd}
+\meta{status}{accepted}
+\meta{created}{2026-11-15}
+\meta{completed}{2026-11-15}
+\import{base-macros}
+
+\p{\strong{Status:} accepted.}
+\p{\strong{Context.} An operator is a call of a method of its trait, and a scalar implements the trait with an impl without methods in \code{\verb~|core::ops~}, such as \code{\verb~|impl Add for i32 { }~}. For vectors to take operators the same way, \pr{999}, one impl has to cover every vector of an element type, whatever its extents. The first draft wrote \code{\verb~|impl<T: Add> Add for Simd<T> { }~}. There \code{\verb~|Simd<T>~} took the element type, while everywhere else \code{\verb~|Simd~} takes an array type, \code{\verb~|Simd<[f32; 4]>~}. That spelling reads like a type and means something else, so it was not kept.}
+\p{\strong{Decision.} The target is written \code{\verb~|Simd<[T; ..]>~}: the array form with the whole extent list replaced by \code{\verb~|..~}. \pr{1036}.}
+\ul{
+\li{\code{\verb~|[T; ..]~} is accepted in one place, as the argument of \code{\verb~|Simd~} in the target of an impl without methods of a lang trait. The impl may take one type parameter, which is the element type. Anywhere else it is an error.}
+\li{\code{\verb~|..~} replaces the whole list. \code{\verb~|[f32; 4, ..]~} is a syntax error.}
+\li{The self type of such an impl is the vector type with no extents. Matching the header of an impl against a type reads a vector with no extents as any extents.}
+\li{Two such impls of one trait overlap when both leave the element type to a parameter or both name the same element type. \code{\verb~|impl<T: BitAnd> BitAnd for Simd<[T; ..]> { }~} and \code{\verb~|impl BitAnd for Simd<[bool; ..]> { }~} stand side by side; selection moves on to the next impl when a bound of a matching impl fails.}
+}
+\p{\strong{Alternatives considered.}}
+\ul{
+\li{\code{\verb~|Simd<[T]>~}. Nothing in it says that something was left out, and it reads like a type of its own.}
+\li{A named parameter for the extents, \code{\verb~|impl<T: Add, extents S> Add for Simd<[T; S]>~}. It needs a new kind of generic parameter that nothing else uses yet.}
+\li{\code{\verb~|Simd<A>~} with a bound \code{\verb~|A: Array<Elem = T>~}, the way \code{\verb~|Tensor<A>~} takes its argument. It needs bounds that fix an associated type and a trait that the compiler provides for array types. This is the direction to take if generic functions over vectors of any extents are wanted.}
+}
+\p{\strong{Consequences.} A function cannot name every vector of an element type; it reaches vectors through a bound they satisfy, \code{\verb~|fn sum<T: Add>(a: T, b: T) -> T~}. Code that finds impls must match headers and not compare self types, see [ins-YAS4](ins-YAS4).}

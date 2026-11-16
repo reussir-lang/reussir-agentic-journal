@@ -1,0 +1,13 @@
+\title{Operators on vectors}
+\taxon{Change}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{999}
+\import{base-macros}
+
+\p{\code{\verb~|+ - * / %~}, \code{\verb~|& | ^ << >>~} and the unary \code{\verb~|-~} and \code{\verb~|!~} work on \code{\verb~|Simd~} vectors, element by element. A vector implements the trait of the operator when its element type does, so generic code with a bound such as \code{\verb~|T: Add~} accepts vectors. Beyond that, vectors of \code{\verb~|bool~} take \code{\verb~|& | ^ !~}, \code{\verb~|!~} complements an integer vector, and only signed and floating-point vectors negate. Both operands have the same vector type; a scalar is spread with \code{\verb~|simd::splat~}. The impls are declared in \code{\verb~|core::ops~} with the target \code{\verb~|Simd<[T; ..]>~}, see [dec-6NAW](dec-6NAW) and [SIMD vectors](design-simd-vectors-ops). \pr{1036}, \pr{999}.}

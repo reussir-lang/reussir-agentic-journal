@@ -8,11 +8,11 @@
 \tag{compiler}
 \tag{simd}
 \meta{status}{implemented}
-\meta{updated}{2026-11-13}
+\meta{updated}{2026-11-15}
 \meta{created}{2026-11-13}
 \import{base-macros}
 
-\p{\strong{Status:} implemented as a stack of draft pull requests, \pr{994} to \pr{1006}, not merged yet. The [patch plan](design-simd-vectors-plan) lists them, and what was left out and why.}
+\p{\strong{Status:} implemented as a stack of pull requests, \pr{994} to \pr{1006}. \pr{994} to \pr{999} are merged, with \pr{1036} and \pr{1037} added on the way; the rest are drafts. The [patch plan](design-simd-vectors-plan) lists them, and what was left out and why.}
 \p{\code{\verb~|Simd<...>~} is a vector of lanes that the compiler lowers to the MLIR \code{\verb~|vector~} type and, from there, to LLVM vectors. It may have several dimensions, and its last dimension may be scalable, so that one source program runs on SSE, AVX-512, NEON, SVE and RVV. Every operation is predicated: it takes an optional mask of lanes, which is how loop tails and conditional updates are written. Vectors read and write memory through [opaque pointers](design-opaque-pointers).}
 \subtree[design-simd-vectors-prior]{
 \title{What other languages do}
@@ -122,7 +122,7 @@ Simd<[bool; 16]>          // a mask of 16 lanes            vector<16xi1>
 \ul{
 \li{Floating-point \code{\verb~|reduce_add~} and \code{\verb~|reduce_mul~} combine in lane order. \code{\verb~|reduce_add_reassoc~} and \code{\verb~|reduce_mul_reassoc~} allow any order, which is what lets a target reduce in parallel; they set the \code{\verb~|reassoc~} fast-math flag of \code{\verb~|vector.reduction~}.}
 \li{\code{\verb~|reduce_min~} and \code{\verb~|reduce_max~} on floating-point use the \code{\verb~|minnumf~} and \code{\verb~|maxnumf~} kinds, which ignore a NaN lane, as the scalar \code{\verb~|min~} and \code{\verb~|max~} of \code{\verb~|core::intrinsic::math~} do.}
-\li{The operators \code{\verb~|+ - * / % & | ^ << >>~} and the unary \code{\verb~|-~} and \code{\verb~|!~} work lane by lane on vectors, and \code{\verb~|& | ^ !~} on masks. They have no masked form; the functions do. The comparison operators stay scalar, because they must yield a \code{\verb~|bool~}; lanes are compared with \code{\verb~|eq~}, \code{\verb~|lt~} and the others, which yield a mask.}
+\li{The operators \code{\verb~|+ - * / % & | ^ << >>~} and the unary \code{\verb~|-~} and \code{\verb~|!~} work lane by lane on vectors, and \code{\verb~|& | ^ !~} on masks. A vector implements the trait of the operator through an impl in \code{\verb~|core::ops~} whose target is \code{\verb~|Simd<[T; ..]>~}, see [dec-6NAW](dec-6NAW), so an operator on a vector is typed like one on a number and the method of the trait can be called on it, \code{\verb~|a.add(b)~}. They have no masked form; the functions do. The comparison operators stay scalar, because they must yield a \code{\verb~|bool~}; lanes are compared with \code{\verb~|eq~}, \code{\verb~|lt~} and the others, which yield a mask.}
 }
 }
 

@@ -10,6 +10,8 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-BMC9}
+\transclude{log-TFAN}
 \transclude{log-T5E8}
 \transclude{log-Z1QT}
 \transclude{log-OB96}

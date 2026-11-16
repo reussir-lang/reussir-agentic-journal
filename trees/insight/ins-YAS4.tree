@@ -1,0 +1,19 @@
+\title{An impl that stands for many self types is found by selection, not by comparing self types}
+\taxon{Insight}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{compiler}
+\tag{traits}
+\tag{simd}
+\import{base-macros}
+
+\p{Source: \pr{1036}, \pr{999}, \pr{1037}. Verified.}
+\ul{
+\li{\strong{What happened.} Since \pr{1036} the self type of a builtin impl can stand for many types: \code{\verb~|impl<T: Add> Add for Simd<[T; ..]> { }~} covers every vector of an element type, see [dec-6NAW](dec-6NAW). After \pr{999} gave vectors the operator traits, \code{\verb~|a + b~} and \code{\verb~|Add::add(a, b)~} were accepted on a vector and \code{\verb~|a.add(b)~} was rejected with \code{\verb~|cannot access a field of `Simd<[i32; 4]>`~}. The same call on an \code{\verb~|i32~} worked.}
+\li{\strong{Cause.} A dot call on a receiver without fields listed the impls whose self type was equal to the type of the receiver. Until then every builtin impl named one type, \code{\verb~|impl Add for i32 { }~}, so equality was enough. The self type \code{\verb~|Simd<[T; ..]>~} is equal to no vector type, so the list was empty. The path form and the operator were not affected because they go through selection, which matches the header of an impl against the type.}
+\li{\strong{Look for comparisons of self types.} When a change lets the self type of an impl stand for more than one type, search the checker for code that compares \code{\verb~|self_ty~} of an impl with a type, and send it through selection. \pr{1037} did this for the dot call.}
+\li{\strong{Test every way of calling.} The tests of \pr{999} used the operators and a generic function with a bound, and no dot call. A new impl is reached in four ways: the operator, the path \code{\verb~|Trait::method(a, b)~}, the dot \code{\verb~|a.method(b)~} and a bound of a generic function. Write one test for each.}
+\li{\strong{Widen the existing search instead of adding a case.} The first version of the fix kept the comparison for scalars and added a second search for vectors beside it. A vector needs no case of its own: one search by selection, the one record receivers already used, serves scalars, \code{\verb~|str~}, big integers and vectors, and the change removed more lines than it added. A case for one type next to an existing search suggests that the search is too narrow.}
+\li{\strong{What changed for scalars.} Only the wording of one error: a dot call through a trait with a type parameter was rejected before and is rejected now, and reports \code{\verb~|no method `conv` on `i32`~} where it reported \code{\verb~|`i32` does not implement `Conv`~}.}
+}
