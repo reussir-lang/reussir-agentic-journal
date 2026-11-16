@@ -19,8 +19,9 @@
 
 \ul{
 \li{A regex is built with a tree builder. Parsing a pattern string is left to a later version.}
-\li{The input alphabet is a parameter: bytes or characters.}
-\li{A matcher holds a list of rules, each a regex with an action value, and returns the action of the rule that wins. This is the lexer form of Paguroidea: longest match, the earliest rule on a tie, anchored at the current position.}
+\li{The input is bytes, and the alphabet is a parameter: a unit is one byte, or one character decoded from UTF-8 as the matcher goes.}
+\li{A matcher holds a list of rules, each a regex with an action. A match names the rule that wins and every other rule that matches the same text. This is the lexer form of Paguroidea: longest match, the earliest rule on a tie, anchored at the current position.}
+\li{Input may arrive in pieces, for both alphabets.}
 \li{Transitions are held in lookup tables that belong to one matcher and are built at run time, with vector acceleration for the states that loop on themselves.}
 }
 
@@ -77,35 +78,52 @@ space  = ' '+          action: Token::Space
 }
 
 \subtree[design-regex-derivatives-alphabet]{
-\title{2. The automaton steps on units of a fixed width}
+\title{2. The input is bytes; the alphabet says what a unit is}
 
-\p{One step of the automaton consumes one unit, and a unit has a fixed width in memory: one byte, or one \code{\verb~|char~} of four bytes. The unit the automaton steps on and the lane of the vector that looks ahead are always the same thing, so the two never disagree about where a unit starts.}
-
-\p{The alphabet is a trait with two implementations, and the regex tree, the node table and the matcher are generic in it. The trait is given in decision 5.}
+\p{The matcher always reads bytes. An alphabet tells, for a position, how many bytes the unit there takes and which class it is in. The regex tree, the node table and the matcher are generic in the alphabet; the trait is given in decision 5.}
 
 \ul{
-\li{\code{\verb~|Bytes~}: a unit is a \code{\verb~|u8~}. A set is 256 bits. Text in UTF-8 is matched this way.}
-\li{\code{\verb~|Chars~}: a unit is a \code{\verb~|char~} stored in four bytes, for input that is already decoded. A set is a sorted list of ranges.}
+\li{\code{\verb~|Bytes~}: a unit is one byte. A set is 256 bits.}
+\li{\code{\verb~|Chars~}: a unit is one character, decoded from UTF-8 in the matching loop, one to four bytes. A set is a sorted list of ranges of code points.}
 }
 
-\p{A regex written with sets of characters is matched against UTF-8 text by translating it to a regex over bytes when it is built, not by decoding in the loop; see "Characters over UTF-8 text" below.}
+\p{Both read the same kind of input, so both can take it in pieces; see "Reading input" and "Characters".}
 
 \p{The classes are computed once for all rules of a matcher, by refining a partition with each set the rules mention, as .NET and RE\verb~|#~ do. Paguroidea computes classes per state, which suits generated code but not one table indexed by state and class.}
 }
 
 \subtree[design-regex-derivatives-actions]{
-\title{3. A state is a vector of regexes, and a match returns an action value}
+\title{3. A state is a vector of regexes; a match names rules, and actions are looked up by rule}
 
-\p{As in Paguroidea, a state holds one node per rule, and a state accepts with the first rule whose node accepts the empty string. The matcher is generic in the type \code{\verb~|T~} of the action values:}
+\p{As in Paguroidea, a state holds one node per rule, and a rule accepts in a state when its node accepts the empty string.}
+
+\p{What the automaton produces is rule indices, nothing else:}
 
 \pre{\verb~|
-pub struct Rule<A: Alphabet, T> { regex: Regex<A>, action: T }
-pub struct Match<T> { length: u64, action: T }
+pub struct Match { start: u64, length: u64, rule: u32, accept: u32 }
 ~}
 
-\p{\code{\verb~|T~} is any type: a token kind, a number, or a function that the caller applies to the matched text. Paguroidea splices the action in as code; at run time the winning rule is an index, and the matcher returns the value stored at that index.}
+\ul{
+\li{\code{\verb~|rule~} is the winner: the earliest rule that accepts at the longest length.}
+\li{\code{\verb~|accept~} identifies the set of all rules that accept there. \code{\verb~|lexer.rules(m)~} lists them in rule order. Two rules such as a keyword and an identifier both match \code{\verb~|while~}; the winner is the keyword, and the list has both.}
+}
 
-\p{A single regex is the case of one rule whose action is the unit value.}
+\p{Actions sit beside the automaton, in a table indexed by rule. The matcher is generic in their type \code{\verb~|T~} and offers three ways to use them, all built on \code{\verb~|Match~}:}
+
+\table{
+\tr{\th{Call}\th{Gives}\th{Use}}
+\tr{\td{\code{\verb~|lexer.next(source)~}}\td{the next \code{\verb~|Match~}}\td{the caller decides what to do with it}}
+\tr{\td{\code{\verb~|lexer.action(m)~}}\td{the value of type \code{\verb~|T~} stored for \code{\verb~|m.rule~}}\td{\code{\verb~|T~} is data, such as a token kind: the caller dispatches with \code{\verb~|match~}}}
+\tr{\td{\code{\verb~|lexer.fold(source, state)~}}\td{the final state}\td{\code{\verb~|T~} is a function from a state and the matched bytes to a new state: the matcher calls the action of every match in turn}}
+}
+
+\p{\code{\verb~|fold~} is the dispatch form: each rule's function is called as its rule matches, and the state it threads can collect every match. A list of all matches is \code{\verb~|fold~} with an action that appends; \code{\verb~|lexer.matches(source)~} is that, for any \code{\verb~|T~}.}
+
+\p{A rule may be marked as skipped, for white space and comments: \code{\verb~|next~} goes on to the following match, and \code{\verb~|fold~} does not call an action for it.}
+
+\p{Why the automaton holds indices and not the values of \code{\verb~|T~}: states are compared and hashed while the table is built, which a \code{\verb~|T~} need not support; a set of accepting rules is a set of small integers; and a completed table does not depend on \code{\verb~|T~}.}
+
+\p{A single regex is the case of one rule.}
 }
 
 \subtree[design-regex-derivatives-table]{
@@ -131,9 +149,9 @@ let (lexer, token) = lexer.next(text, position);
 }
 
 \subtree[design-regex-derivatives-simd]{
-\title{5. Acceleration belongs to the alphabet}
+\title{5. Decoding and acceleration belong to the alphabet}
 
-\p{The matcher itself has no vector code. Whether a state can skip over a run of units, and how, is decided by the alphabet through two functions of its trait:}
+\p{The matcher has no decoding and no vector code. Both are functions of the alphabet:}
 
 \pre{\verb~|
 pub trait Alphabet {
@@ -145,16 +163,22 @@ pub trait Alphabet {
     type Run;
 
     fn classes(sets: Vec<Self::Set>) -> Self::Classes;
-    fn class_at(classes: Self::Classes, window: Window, at: u64) -> u32;
+
+    /// The unit that starts at `at`: its class and its width in bytes;
+    /// or that the window ends inside it; or that no unit starts there.
+    fn unit(classes: Self::Classes, window: Window, at: u64) -> Unit;
 
     /// How to skip a run of units of `set`, or none when this alphabet has no skip for it.
     fn run(set: Self::Set) -> Option<Self::Run>;
-    /// The first index from `at` on whose unit is outside the run, or the length of the window.
+    /// The first position from `at` on where a unit outside the run starts, or the
+    /// end of the last whole unit in the window.
     fn skip(run: Self::Run, window: Window, at: u64) -> u64;
 }
+
+pub enum Unit { Class(u32, u64), Incomplete, Malformed }
 ~}
 
-\p{When a state is created, the matcher computes the set of units on which the state loops to itself and asks the alphabet for a run. In the loop it calls \code{\verb~|skip~} for a state that has one. An alphabet that returns no run is matched one unit at a time, and nothing else changes.}
+\p{When a state is created, the matcher computes the set of units on which the state loops to itself and asks the alphabet for a run. In the loop it calls \code{\verb~|skip~} for a state that has one. An alphabet that returns no run is matched one unit at a time, and nothing else changes. A skip must return a position where a unit starts.}
 
 \p{\code{\verb~|Bytes~} gives a run in two forms. Vector code cannot be generated per regex the way Paguroidea generates it at compile time, so its shape is fixed and its constants are data.}
 
@@ -166,7 +190,7 @@ pub trait Alphabet {
 
 \p{Both rows use operations that exist. A membership test for an arbitrary set of bytes on a whole vector at once would need a shuffle whose indices are a run-time vector, which \code{\verb~|core::simd~} does not have; it is not part of this design.}
 
-\p{\code{\verb~|Chars~} gives no run in the first version. Because a \code{\verb~|char~} unit has a fixed width, the compare form of the first row would work on lanes of 32 bits, and can be added to \code{\verb~|Chars~} later without touching the matcher.}
+\p{\code{\verb~|Chars~} may give no run, and is then matched one character at a time. It can also reuse the skip of \code{\verb~|Bytes~} on a set of bytes derived from the set of characters; see "Characters".}
 }
 
 \subtree[design-regex-derivatives-home]{
@@ -182,13 +206,13 @@ pub trait Alphabet {
 \subtree[design-regex-derivatives-window]{
 \title{The window}
 
-\p{The matcher reads input through a window: a pointer to the first unit and a number of units, stored one after another.}
+\p{The matcher reads input through a window: a pointer to the first byte and a number of bytes.}
 
 \pre{\verb~|
-pub struct Window { base: ConstPtr<Generic>, len: u64 }
+pub struct Window { base: ConstPtr<Generic>, len: u64 }      // len in bytes
 ~}
 
-\p{The window is what makes looking ahead possible. A step reads the unit at an index; a skip loads a vector of units starting at an index. Neither reads at or past \code{\verb~|len~}: the last chunk is loaded under the mask \code{\verb~|mask_first(len - at)~}, so no unit outside the window is touched and there is no scalar loop for the remainder.}
+\p{The window is what makes looking ahead possible. A step reads the unit that starts at a position; a skip loads a vector of bytes starting at a position. Neither reads at or past \code{\verb~|len~}: the last chunk is loaded under the mask \code{\verb~|mask_first(len - at)~}, so no unit outside the window is touched and there is no scalar loop for the remainder.}
 }
 
 \subtree[design-regex-derivatives-loop]{
@@ -209,20 +233,25 @@ loop {
     if accepting[state] is a rule   { accepted = (rule, at) }
     if state has a run              { at = skip(run, window, at) ; if it moved and accepting[state] { accepted = (rule, at) } }
     if at == window.len             { return Exhausted }
-    class = class_at(window, at)
-    next  = table[state * classes + class]        // computed and stored if missing
-    if next is dead                 { return Dead }
-    state = next ; at = at + 1
+    match unit(classes, window, at) {
+        Incomplete                  => return Exhausted        // the window ends inside a character
+        Malformed                   => return Dead
+        Class(class, width)         => {
+            next = table[state * classes + class]              // computed and stored if missing
+            if next is dead         { return Dead }
+            state = next ; at = at + width
+        }
+    }
 }
 ~}
 
-\p{\code{\verb~|Dead~} means no rule can match further: the result is \code{\verb~|accepted~}. \code{\verb~|Exhausted~} means the window ended while some rule could still match.}
+\p{\code{\verb~|Dead~} means no rule can match further: the result is \code{\verb~|accepted~}. \code{\verb~|Exhausted~} means the window ended, possibly inside a character, while some rule could still match. For \code{\verb~|Bytes~}, \code{\verb~|unit~} is one load from the class map and its width is always one.}
 }
 
 \subtree[design-regex-derivatives-skip]{
 \title{The skip}
 
-\p{For a state that loops on \code{\verb~|[a-z]~}, the skip of \code{\verb~|Bytes~} is this function. The bounds \code{\verb~|lo~} and \code{\verb~|hi~} are fields of the state's run.}
+\p{For a state that loops on the bytes \code{\verb~|[a-z]~}, the skip of \code{\verb~|Bytes~} is this function. The bounds \code{\verb~|lo~} and \code{\verb~|hi~} are fields of the state's run.}
 
 \pre{\verb~|
 fn skip(lo: u8, hi: u8, base: ConstPtr<Generic>, at: u64, len: u64) -> u64 {
@@ -238,7 +267,7 @@ fn skip(lo: u8, hi: u8, base: ConstPtr<Generic>, at: u64, len: u64) -> u64 {
 }
 ~}
 
-\p{\code{\verb~|first_set~} of the complement counts the leading units that are both loaded and in the set, so \code{\verb~|end~} is the first index whose unit is outside the set, or \code{\verb~|len~}. The vectors are local to one iteration; the loop carries only \code{\verb~|i~}.}
+\p{\code{\verb~|first_set~} of the complement counts the leading bytes that are both loaded and in the set, so \code{\verb~|end~} is the first position whose byte is outside the set, or \code{\verb~|len~}. The vectors are local to one iteration; the loop carries only \code{\verb~|i~}.}
 
 \p{This function is part of \code{\verb~|Bytes::skip~}. The matching loop above calls \code{\verb~|skip~} through the alphabet and never names a vector type.}
 }
@@ -250,16 +279,16 @@ fn skip(lo: u8, hi: u8, base: ConstPtr<Generic>, at: u64, len: u64) -> u64 {
 
 \pre{\verb~|
 pub trait Source {
-    /// The units held from the start of the current token on.
+    /// The bytes held from the start of the current token on.
     fn window(self: Self) -> Window;
-    /// Read more units after those held, keeping them. False at the end of input.
+    /// Read more bytes after those held, keeping them. False at the end of input.
     fn extend(self: Self) -> (Self, bool);
-    /// Drop the first `count` units: a token was returned.
+    /// Drop the first `count` bytes: a token was returned.
     fn consume(self: Self, count: u64) -> Self;
 }
 ~}
 
-\p{A \code{\verb~|String~}, a \code{\verb~|Text~} or a \code{\verb~|Vec~} is a source whose window is all of it and which never extends. A buffered reader keeps the units of the current token and appends to them.}
+\p{A \code{\verb~|String~}, a \code{\verb~|Text~} or a \code{\verb~|Vec~} of bytes is a source whose window is all of it and which never extends. A buffered reader keeps the bytes of the current token and appends to them. The source does not depend on the alphabet.}
 
 \p{\code{\verb~|next~} is then:}
 
@@ -274,42 +303,79 @@ loop {
 return the action and length of scan.accepted, and source.consume(length)
 ~}
 
-\p{The scan is kept across \code{\verb~|extend~}, so the matcher never reads a unit twice, and a skip that stopped at the end of one piece goes on in the next. The units of the token stay in the window until \code{\verb~|consume~}, because the longest match may end before the last unit read.}
+\p{The scan is kept across \code{\verb~|extend~}, so the matcher never reads a byte twice, and a skip that stopped at the end of one piece goes on in the next. The bytes of the token stay in the window until \code{\verb~|consume~}, because the longest match may end before the last byte read.}
+
+\p{A character cut in two by the end of a piece needs no buffer of its own: \code{\verb~|unit~} reports \code{\verb~|Incomplete~}, the scan stays where the character starts, and after \code{\verb~|extend~} the window holds all of it.}
+
+\p{For a caller that pushes pieces instead of being asked for them, the library provides a source that owns a buffer:}
+
+\pre{\verb~|
+let stream = Stream::new(lexer);
+let (stream, matches) = stream.feed(piece);      // every match that is certain so far
+let (stream, matches) = stream.finish();         // the end of input
+~}
+
+\p{\code{\verb~|Stream~} holds the lexer, the scan and the bytes not yet consumed. A match is certain once the scan is \code{\verb~|Dead~}; until then the bytes of the token in progress are kept.}
 }
 }
 
 \subtree[design-regex-derivatives-characters]{
-\title{Characters over UTF-8 text}
+\title{Characters}
 
-\p{Text is UTF-8: a character takes one to four bytes. A vector can only look ahead in units of one width, and a character is not one. There are three ways a regex over characters can meet such text.}
+\p{Text is UTF-8: a character takes one to four bytes. A regex over characters can meet such text in three ways.}
 
 \table{
-\tr{\th{Way}\th{What the loop steps on}\th{Vector look-ahead}\th{Piece boundaries}\th{Table}}
-\tr{\td{translate the regex to bytes when it is built}\td{bytes}\td{on bytes, as for any byte regex}\td{nothing special: half a character is a state}\td{more states for sets beyond ASCII}}
-\tr{\td{decode in the loop}\td{characters of varying width}\td{on bytes, with a rule for when a byte ends a run}\td{up to three bytes carried over}\td{fewer states; a decode and a search per character}}
-\tr{\td{decode the text first}\td{\code{\verb~|char~} units}\td{on \code{\verb~|u32~} lanes}\td{nothing special}\td{fewer states; the text is copied at four bytes per character}}
+\tr{\th{Way}\th{What the loop steps on}\th{States}\th{Per character}}
+\tr{\td{decode in the loop}\td{characters}\td{one step per character}\td{a decode, and a search in the class map beyond ASCII}}
+\tr{\td{translate the regex to bytes when it is built}\td{bytes}\td{more, for sets beyond ASCII}\td{one table load per byte}}
+\tr{\td{decode the text first}\td{\code{\verb~|char~} units of four bytes}\td{one step per character}\td{the text is copied at four bytes per character}}
 }
 
-\p{Chosen: the first for UTF-8 text, and the third is what \code{\verb~|Chars~} is. The second is not used: it is the only one where the loop and the vector disagree about what a unit is, and it needs a carry at every boundary between pieces.}
+\p{Chosen: decode in the loop. Bytes and characters then share one kind of input and one matcher, and both take input in pieces.}
 
-\subtree[design-regex-derivatives-utf8]{
-\title{Translating a set of characters to bytes}
+\subtree[design-regex-derivatives-decoding]{
+\title{Decoding}
 
-\p{A set of characters is a sorted list of ranges of code points. Each range is cut where the number of bytes changes (at U+0080, U+0800, U+10000) and where a leading byte changes, which leaves ranges whose encodings are a sequence of byte ranges. The set becomes the union of those sequences.}
+\p{\code{\verb~|Chars::unit~} at a position:}
 
-\p{Example: the Greek lower-case letters \code{\verb~|[α-ω]~}, U+03B1 to U+03C9. All take two bytes. \code{\verb~|α~} is \code{\verb~|CE B1~} and \code{\verb~|ω~} is \code{\verb~|CF 89~}, so the range is cut at the leading byte:}
+\ol{
+\li{The byte is below \code{\verb~|80~}: the class comes from a table of 128 entries, the width is one. Text that is mostly ASCII takes this path.}
+\li{Otherwise the first byte gives the width. If the window ends before the last byte of the character, the answer is \code{\verb~|Incomplete~}.}
+\li{The code point is assembled and its class found by binary search in the sorted bounds of the classes.}
+\li{A byte that cannot start a character, or a wrong continuation byte, is \code{\verb~|Malformed~}, which ends the match there.}
+}
+}
+
+\subtree[design-regex-derivatives-char-skip]{
+\title{Skipping, without decoding}
+
+\p{A vector looks ahead on bytes, and a skip must stop where a character starts. That holds for a set of bytes derived from the loop set \code{\verb~|S~} of characters:}
 
 \pre{\verb~|
-[α-ω]   =   CE [B1-BF]   |   CF [80-89]
+bytes(S) = the ASCII characters of S, as bytes
+           and all bytes 80 to FF, if S has every character beyond ASCII
 ~}
 
-\p{\code{\verb~|[α-ω]+~} over bytes is then an automaton of four states: the start, "after \code{\verb~|CE~}", "after \code{\verb~|CF~}", and the accepting state between characters, which goes back to the two middle states.}
+\p{\code{\verb~|Chars~} then skips with the skip of \code{\verb~|Bytes~} on \code{\verb~|bytes(S)~}.}
 
-\p{A set with ASCII in it keeps its ASCII part as one byte range: \code{\verb~|[a-zα-ω]~} is \code{\verb~|[61-7A] | CE [B1-BF] | CF [80-89]~}. The accepting state of \code{\verb~|[a-zα-ω]+~} loops on \code{\verb~|[61-7A]~}, so a run of ASCII letters is skipped by the vector, and a Greek letter takes two steps through the table.}
+\p{Why the stop is where a character starts, in well-formed text and starting from such a position:}
 
-\p{Complement is taken on the set of characters before translating, so \code{\verb~|[^"]~} is every character but the quote, and its translation never matches half a character. The complement of a regex, \code{\verb~|not(r)~}, is intersected with "any sequence of characters" after translating, for the same reason.}
+\ul{
+\li{If \code{\verb~|S~} has every character beyond ASCII, the skip stops only at an ASCII byte, and an ASCII byte is always a whole character.}
+\li{Otherwise it stops at the first byte that is \code{\verb~|80~} or above, or at an ASCII byte outside \code{\verb~|S~}. Every byte before it in the run was ASCII, so that byte starts a character.}
+}
 
-\p{What this costs: a set with many ranges beyond ASCII becomes a union of many sequences, so more nodes and more states. With the table filled on demand, only the states the input reaches are built.}
+\p{At the end of the window the skip may have run into a character that is cut in two; it then steps back to where that character starts, which is at most three bytes.}
+
+\p{Two examples:}
+
+\table{
+\tr{\th{Loop set \code{\verb~|S~}}\th{\code{\verb~|bytes(S)~}}\th{Effect}}
+\tr{\td{\code{\verb~|[^"\\]~}, the inside of a string literal}\td{all bytes but the quote and the backslash}\td{the skip runs through text in any script and stops at a quote or a backslash}}
+\tr{\td{\code{\verb~|[a-zα-ω]~}}\td{\code{\verb~|[61-7A]~}}\td{the skip runs through ASCII letters; a Greek letter is decoded and takes one step, after which the skip resumes}}
+}
+
+\p{So \code{\verb~|Chars~} is accelerated exactly where its loop set is plain on the byte level, and falls back to one decoded step otherwise.}
 }
 }
 
@@ -335,12 +401,13 @@ return the action and length of scan.accepted, and source.consume(length)
 
 \table{
 \tr{\th{Table}\th{Indexed by}\th{Entry}}
-\tr{\td{class map}\td{unit (256 entries for bytes; for \code{\verb~|char~} units, 128 entries and a sorted list of bounds)}\td{class}}
+\tr{\td{class map}\td{unit (256 entries for \code{\verb~|Bytes~}; for \code{\verb~|Chars~}, 128 entries for ASCII and a sorted list of bounds)}\td{class}}
 \tr{\td{transitions}\td{state × class}\td{state, with two reserved values: not computed, dead}}
-\tr{\td{accepting}\td{state}\td{rule index or none}}
+\tr{\td{accepting}\td{state}\td{none, or the winning rule and the set of accepting rules}}
+\tr{\td{accepting sets}\td{set id}\td{the rules that accept, in rule order}}
 \tr{\td{runs}\td{state}\td{none, or the run the alphabet gave for its loop set}}
 \tr{\td{states}\td{state}\td{its vector of nodes; and the reverse map from a vector to its state}}
-\tr{\td{actions}\td{rule index}\td{the value of type \code{\verb~|T~}}}
+\tr{\td{rules}\td{rule index}\td{the action of type \code{\verb~|T~}, and whether the rule is skipped}}
 }
 }
 
@@ -355,13 +422,24 @@ let digit  = Regex::<Bytes>::range(48, 57);
 let rules = Vec::new()
     .push(Rule::new(lower.plus(), Token::Ident))
     .push(Rule::new(digit.plus(), Token::Number))
-    .push(Rule::new(Regex::<Bytes>::byte(32).plus(), Token::Space));
+    .push(Rule::skip(Regex::<Bytes>::byte(32).plus()));
 let lexer = Lexer::new(rules);
 
-let (lexer, token) = lexer.next(text, 0);     // Some(Match { length: 3, action: Token::Ident })
+// Data as actions: the caller dispatches.
+let (lexer, source, found) = lexer.next(source);       // Some(Match { start: 0, length: 3, rule: 0, .. })
+match found {
+    Some(m) => match lexer.action(m) { Token::Ident => ..., Token::Number => ... },
+    None => ...
+}
+
+// Functions as actions: the matcher dispatches, over all matches.
+let count = Lexer::new(Vec::new()
+    .push(Rule::new(lower.plus(), |n: u64, text: Window| n + 1))
+    .push(Rule::skip(Regex::<Bytes>::byte(32).plus())));
+let (count, words) = count.fold(source, 0);
 ~}
 
-\p{Builder functions: \code{\verb~|empty~}, \code{\verb~|epsilon~}, \code{\verb~|set~}, \code{\verb~|byte~} or \code{\verb~|char~}, \code{\verb~|range~}, \code{\verb~|literal~}, \code{\verb~|then~}, \code{\verb~|or~}, \code{\verb~|and~}, \code{\verb~|not~}, \code{\verb~|star~}, \code{\verb~|plus~}, \code{\verb~|optional~}; and, for a regex over bytes, \code{\verb~|chars~} to give a set of characters that is translated to UTF-8.}
+\p{Builder functions: \code{\verb~|empty~}, \code{\verb~|epsilon~}, \code{\verb~|set~}, \code{\verb~|byte~} or \code{\verb~|char~}, \code{\verb~|range~}, \code{\verb~|literal~}, \code{\verb~|then~}, \code{\verb~|or~}, \code{\verb~|and~}, \code{\verb~|not~}, \code{\verb~|star~}, \code{\verb~|plus~}, \code{\verb~|optional~}.}
 }
 
 \subtree[design-regex-derivatives-open]{
@@ -370,7 +448,9 @@ let (lexer, token) = lexer.next(text, 0);     // Some(Match { length: 3, action:
 \ul{
 \li{Whether intersection and complement belong in the first version. Paguroidea has them. With them a state can match nothing without being the node \code{\verb~|∅~}, so recognizing that no rule can match any more needs an emptiness test.}
 \li{Whether the first version fills the table on demand, or builds it completely as Paguroidea does and adds filling on demand later.}
-\li{Whether \code{\verb~|Chars~}, input already decoded to \code{\verb~|char~} units, is wanted in the first version, or only bytes with sets of characters translated to UTF-8.}
+\li{Whether \code{\verb~|Chars~} skips from the first version on, or is matched one character at a time first.}
+\li{What \code{\verb~|Malformed~} should do for input that is not known to be UTF-8: end the match, as here, or count the byte as a unit of its own class.}
+\li{Whether "all matches" should also mean a search for one regex anywhere in the input. That needs an automaton for \code{\verb~|.*r~} and is left to a later version here.}
 \li{What happens at the state limit: an error, or dropping the table and starting it again.}
 }
 }
