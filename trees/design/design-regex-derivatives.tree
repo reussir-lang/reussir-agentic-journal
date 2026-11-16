@@ -10,7 +10,7 @@
 \meta{created}{2026-11-16}
 \import{base-macros}
 
-\p{\strong{Status:} draft, for discussion. The sets of bytes and of characters and the classes of bytes are in the standard library (\pr{1039}); the UTF-8 sequences of a set of characters are in review as \pr{1041}; nothing else is implemented.}
+\p{\strong{Status:} draft, for discussion. The sets of bytes and of characters and the classes of bytes (\pr{1039}) and the UTF-8 sequences of a set of characters (\pr{1041}) are in the standard library; the regex tree and its translation to bytes are in review as \pr{1042}; nothing else is implemented.}
 
 \p{A regex engine written in Reussir whose automaton is built from Brzozowski derivatives when the program runs. Its design follows Paguroidea, a lexer generator that builds its automaton when the program is compiled, and replaces each compile-time device of Paguroidea by a run-time one.}
 
@@ -508,7 +508,7 @@ let (stream, matches) = stream.finish();         // the end of input
 \subtree[design-regex-derivatives-data]{
 \title{Data}
 
-\p{The tree a caller builds:}
+\p{The tree a caller builds, \code{\verb~|Regex~}. Its translation, \code{\verb~|ByteRegex~}, is the same without the set of characters, so the stages after it have no case for one:}
 
 \table{
 \tr{\th{Leaf or operator}\th{Holds}}

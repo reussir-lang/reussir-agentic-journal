@@ -1,0 +1,13 @@
+\title{UTF-8 sequences of a set of characters}
+\taxon{Change}
+\date{2026-11-16}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1041}
+\import{base-macros}
+
+\p{\code{\verb~|std::regex::alphabet::utf8~} turns a \code{\verb~|CharSet~} into the UTF-8 encodings of its members: \code{\verb~|fold_sequences~} feeds a function the sequences of one to four byte ranges, \code{\verb~|Utf8Sequence~} and \code{\verb~|Utf8Range~}, in the order of the bytes. A matcher over bytes needs them to match text. See [the translation](design-regex-derivatives-utf8). \pr{1041}.}
