@@ -153,7 +153,7 @@ let (lexer, token) = lexer.next(text, position);
 \subtree[design-regex-derivatives-simd]{
 \title{5. Decoding and acceleration belong to the alphabet}
 
-\p{The matcher has no decoding and no vector code. Both are functions of the alphabet:}
+\p{The matcher has no decoding and no vector code. Both are functions of the alphabet, a sealed trait:}
 
 \pre{\verb~|
 pub trait Alphabet {
@@ -216,11 +216,20 @@ pub enum Unit { Class(u32, u64), Incomplete, Malformed }
 \subtree[design-regex-derivatives-window]{
 \title{The window}
 
-\p{The matcher reads input through a window: a pointer to the first byte and a number of bytes. A window is valid only while the source that gave it is held and unchanged, so it is used between the matcher and the alphabet during one scan and is not part of what a caller sees: positions go out as numbers in a \code{\verb~|Match~}, and text goes out as a \code{\verb~|TextView~}.}
+\p{Inside one scan the matcher reads input through a window: a pointer to the first byte and a number of bytes.}
 
 \pre{\verb~|
 pub struct Window { base: ConstPtr<Generic>, len: u64 }      // len in bytes
 ~}
+
+\p{A window holds a raw pointer, so it never leaves \code{\verb~|std::regex~}:}
+
+\ul{
+\li{\code{\verb~|Window~} is private to the module. No public function takes or returns one.}
+\li{The matcher makes a window from a \code{\verb~|TextView~} at the start of a scan and holds that view until the scan returns, so the pointer cannot outlive the bytes.}
+\li{\code{\verb~|Alphabet~} is a sealed trait: \code{\verb~|Bytes~} and \code{\verb~|Chars~} are its only implementations, and its \code{\verb~|unit~} and \code{\verb~|skip~}, which take a window, cannot be called or implemented outside the module.}
+\li{What a caller sees is positions as numbers in a \code{\verb~|Match~} and text as a \code{\verb~|TextView~}.}
+}
 
 \p{The window is what makes looking ahead possible. A step reads the unit that starts at a position; a skip loads a vector of bytes starting at a position. Neither reads at or past \code{\verb~|len~}: the last chunk is loaded under the mask \code{\verb~|mask_first(len - at)~}, so no unit outside the window is touched and there is no scalar loop for the remainder.}
 }
@@ -234,10 +243,11 @@ pub struct Window { base: ConstPtr<Generic>, len: u64 }      // len in bytes
 pub struct Scan { state: u32, at: u64, accepted: Option<Accept> }   // Accept: the rule and the length at which it accepted
 ~}
 
-\p{One call advances a scan over a window:}
+\p{One call advances a scan over the bytes a source holds:}
 
 \pre{\verb~|
-fn run(lexer, scan, window) -> (lexer, scan, Status)      // Status: Dead or Exhausted
+fn run(lexer, scan, held: TextView) -> (lexer, scan, Status)      // Status: Dead or Exhausted
+window = the pointer and length of `held`
 
 loop {
     if accepting[state] is a rule   { accepted = (rule, at) }
@@ -285,15 +295,13 @@ fn skip(lo: u8, hi: u8, base: ConstPtr<Generic>, at: u64, len: u64) -> u64 {
 \subtree[design-regex-derivatives-source]{
 \title{Input that arrives in pieces}
 
-\p{A source hands the matcher its window and can be asked for more:}
+\p{A source hands the matcher the bytes it holds, as a \code{\verb~|TextView~}, and can be asked for more. It is a public trait and has no pointer in it:}
 
 \pre{\verb~|
 pub trait Source {
-    /// The bytes held from the start of the current token on. Valid until the
-    /// next call on the source.
-    fn window(self: Self) -> Window;
-    /// The first `length` of those bytes as a view that shares their owner.
-    fn view(self: Self, length: u64) -> TextView;
+    /// The bytes held from the start of the current token on, as a view that
+    /// shares their owner.
+    fn held(self: Self) -> TextView;
     /// Read more bytes after those held, keeping them. False at the end of input.
     fn extend(self: Self) -> (Self, bool);
     /// Drop the first `count` bytes: a token was returned.
@@ -301,7 +309,7 @@ pub trait Source {
 }
 ~}
 
-\p{A \code{\verb~|Text~}, literal or owned, is a source whose window is all of it and which never extends; its views are ranges of that \code{\verb~|Text~}. A buffered reader keeps the bytes of the current token in a string and appends to them; its views share that string. The source does not depend on the alphabet.}
+\p{A \code{\verb~|Text~}, literal or owned, is a source that holds all of it and never extends. The text of a match is the first \code{\verb~|length~} bytes of \code{\verb~|held()~}, a range of that \code{\verb~|Text~}. A buffered reader keeps the bytes of the current token in a string and appends to them; its views share that string. The source does not depend on the alphabet.}
 
 \p{A view of an owned string shares it. If an action keeps such a view and the reader then needs to append, the string is no longer held by the reader alone, and the reader continues in a new string with the bytes not yet consumed. An action that only reads the view and lets it go costs nothing.}
 
@@ -310,7 +318,7 @@ pub trait Source {
 \pre{\verb~|
 scan = start
 loop {
-    (lexer, scan, status) = run(lexer, scan, source.window())
+    (lexer, scan, status) = run(lexer, scan, source.held())    // a window is made from the view inside `run`
     if status is Dead                    { break }
     (source, more) = source.extend()     // Exhausted: the window ended
     if !more                             { break }
