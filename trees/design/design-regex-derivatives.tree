@@ -22,7 +22,8 @@
 \li{The input is bytes, and the alphabet is a parameter: a unit is one byte, or one character decoded from UTF-8 as the matcher goes.}
 \li{A matcher holds a list of rules, each a regex with an action. A match names the rule that wins and every other rule that matches the same text. This is the lexer form of Paguroidea: longest match, the earliest rule on a tie, anchored at the current position.}
 \li{Input may arrive in pieces, for both alphabets.}
-\li{Transitions are held in lookup tables that belong to one matcher and are built at run time, with vector acceleration for the states that loop on themselves.}
+\li{A regex may use intersection and complement, as in Paguroidea.}
+\li{Transitions are held in one compressed table per matcher, built completely when the rules are turned into a matcher, with vector acceleration for the states that loop on themselves.}
 }
 
 \p{Left to later versions: a pattern parser, search for a match anywhere in the input, captures, lookaround, counted repetition beyond what the builder expands, and Unicode property tables.}
@@ -129,25 +130,38 @@ pub struct Match { start: u64, length: u64, rule: u32, accept: u32 }
 }
 
 \subtree[design-regex-derivatives-table]{
-\title{4. Transitions live in one table filled on demand}
+\title{4. The table is built when rules become a matcher}
+
+\p{Turning the rules into a matcher is the one place where everything is known, so the whole table is built there. Nothing is computed while matching, and a matcher is a value that never changes.}
+
+\p{The table is compressed, and its compression is a property of all states together, which is why it cannot be filled one entry at a time:}
 
 \pre{\verb~|
-class_of[unit]                       -> class
-next[state * classes + class]        -> state, or "not computed yet"
-accepting[state]                     -> rule index, or none
+class_of[unit]                 -> column
+row_of[state]                  -> row
+next[row * columns + column]   -> state
+accepting[state]               -> none, or the winning rule and the set of accepting rules
 ~}
 
-\p{The table starts with the start state only. Reaching an entry that is not computed takes the derivative of that state by that class, finds or adds the resulting state, and stores it. A fixed state stands for "no rule can match any more".}
+\p{The steps, in order:}
 
-\p{Reussir values are not mutated behind the caller's back, so a matcher that fills its table is passed in and returned:}
+\ol{
+\li{\strong{Classes.} Fold \code{\verb~|refine~} over every set in the rules (decision 2).}
+\li{\strong{Nodes.} Turn the regex trees into nodes through the constructors (decision 1).}
+\li{\strong{States.} Starting from the vector of the rules' nodes, take the derivative by every class and collect the vectors reached, until no new one appears. This stops with an error above a limit on the number of states, since some regexes have exponentially many.}
+\li{\strong{Dead states.} A state is dead when no accepting state can be reached from it. With every transition known, this is one walk backwards from the accepting states. All dead states become the single dead state.}
+\li{\strong{Columns.} Two classes whose columns are equal in every state are one column. The classes of step 1 come from the sets as written and may be finer than the automaton needs.}
+\li{\strong{Rows.} Two states whose rows are equal share one row.}
+\li{\strong{Runs.} For every state, the classes on which it loops to itself, and from them its run (decision 5).}
+}
+
+\p{Step 4 is what makes intersection and complement cost nothing extra. With them a state can match nothing without being the node \code{\verb~|∅~}: \code{\verb~|[a-z]+ & [0-9]+~} is such a regex. Asking that of a regex needs an emptiness test; asking it of the finished automaton is the walk of step 4, which is needed in any case to stop a match as early as possible.}
+
+\p{A matcher is passed around freely and shared, because it is never updated:}
 
 \pre{\verb~|
-let (lexer, token) = lexer.next(text, position);
+let (source, found) = lexer.next(source);
 ~}
-
-\p{When the caller holds the only reference, the update happens in place.}
-
-\p{A second entry point completes the table for every reachable state and returns a matcher that never changes, for callers that want to share one. It stops with an error above a state limit, since some regexes have exponentially many states.}
 }
 
 \subtree[design-regex-derivatives-simd]{
@@ -246,7 +260,7 @@ pub struct Scan { state: u32, at: u64, accepted: Option<Accept> }   // Accept: t
 \p{One call advances a scan over the bytes a source holds:}
 
 \pre{\verb~|
-fn run(lexer, scan, held: TextView) -> (lexer, scan, Status)      // Status: Dead or Exhausted
+fn run(lexer, scan, held: TextView) -> (scan, Status)      // Status: Dead or Exhausted
 window = the pointer and length of `held`
 
 loop {
@@ -256,10 +270,10 @@ loop {
     match unit(classes, window, at) {
         Incomplete                  => return Exhausted        // the window ends inside a character
         Malformed                   => return Dead
-        Class(class, width)         => {
-            next = table[state * classes + class]              // computed and stored if missing
-            if next is dead         { return Dead }
-            state = next ; at = at + width
+        Class(column, width)        => {
+            to = next[row_of[state] * columns + column]
+            if to is dead           { return Dead }
+            state = to ; at = at + width
         }
     }
 }
@@ -318,7 +332,7 @@ pub trait Source {
 \pre{\verb~|
 scan = start
 loop {
-    (lexer, scan, status) = run(lexer, scan, source.held())    // a window is made from the view inside `run`
+    (scan, status) = run(lexer, scan, source.held())    // a window is made from the view inside `run`
     if status is Dead                    { break }
     (source, more) = source.extend()     // Exhausted: the window ended
     if !more                             { break }
@@ -338,7 +352,7 @@ let (stream, matches) = stream.feed(piece);      // every match that is certain 
 let (stream, matches) = stream.finish();         // the end of input
 ~}
 
-\p{\code{\verb~|Stream~} holds the lexer, the scan and the bytes not yet consumed. A match is certain once the scan is \code{\verb~|Dead~}; until then the bytes of the token in progress are kept.}
+\p{\code{\verb~|Stream~} holds the scan and the bytes not yet consumed, beside the lexer. A match is certain once the scan is \code{\verb~|Dead~}; until then the bytes of the token in progress are kept.}
 }
 }
 
@@ -425,7 +439,9 @@ bytes(S) = the ASCII characters of S, as bytes
 \table{
 \tr{\th{Table}\th{Indexed by}\th{Entry}}
 \tr{\td{class map}\td{unit (256 entries for \code{\verb~|Bytes~}; for \code{\verb~|Chars~}, 128 entries for ASCII and a sorted list of bounds)}\td{class}}
-\tr{\td{transitions}\td{state × class}\td{state, with two reserved values: not computed, dead}}
+\tr{\td{columns}\td{class}\td{column of the transition table}}
+\tr{\td{rows}\td{state}\td{row of the transition table}}
+\tr{\td{transitions}\td{row × column}\td{state, with one reserved value: dead}}
 \tr{\td{accepting}\td{state}\td{none, or the winning rule and the set of accepting rules}}
 \tr{\td{accepting sets}\td{set id}\td{the rules that accept, in rule order}}
 \tr{\td{runs}\td{state}\td{none, or the run the alphabet gave for its loop set}}
@@ -453,7 +469,7 @@ let lexer = Rules::new()
     .skip(space.plus())
     .lexer();
 
-let (lexer, source, found) = lexer.next(source);       // Some(Match { start: 0, length: 3, rule: 0, .. })
+let (source, found) = lexer.next(source);       // Some(Match { start: 0, length: 3, rule: 0, .. })
 match found {
     Some(m) => match lexer.action(m) { Token::Ident => ..., Token::Number => ... },
     None => ...
@@ -464,14 +480,14 @@ let counter = Rules::new()
     .rule(lower.plus(), |words: u64, text: TextView| words + 1)
     .skip(space.plus())
     .lexer();
-let (counter, words) = counter.fold(source, 0);
+let words = counter.fold(source, 0);
 ~}
 
 \table{
 \tr{\th{Value}\th{Made by}\th{Used by}}
 \tr{\td{\code{\verb~|Regex<A>~}}\td{\code{\verb~|empty~}, \code{\verb~|epsilon~}, \code{\verb~|set~}, \code{\verb~|byte~} or \code{\verb~|char~}, \code{\verb~|range~}, \code{\verb~|literal~}; and from regexes: \code{\verb~|then~}, \code{\verb~|or~}, \code{\verb~|and~}, \code{\verb~|not~}, \code{\verb~|star~}, \code{\verb~|plus~}, \code{\verb~|optional~}}\td{\code{\verb~|rule~}, \code{\verb~|skip~}}}
 \tr{\td{\code{\verb~|Rules<A, T>~}}\td{\code{\verb~|Rules::new()~}, then \code{\verb~|rule(regex, action)~} and \code{\verb~|skip(regex)~}}\td{\code{\verb~|lexer()~}}}
-\tr{\td{\code{\verb~|Lexer<A, T>~}}\td{\code{\verb~|rules.lexer()~}}\td{\code{\verb~|next~}, \code{\verb~|action~}, \code{\verb~|rules~}, \code{\verb~|fold~}, \code{\verb~|matches~}, \code{\verb~|complete~}}}
+\tr{\td{\code{\verb~|Lexer<A, T>~}}\td{\code{\verb~|rules.lexer()~}, which builds the table and fails above the state limit}\td{\code{\verb~|next~}, \code{\verb~|action~}, \code{\verb~|rules~}, \code{\verb~|fold~}, \code{\verb~|fold_matches~}, \code{\verb~|matches~}}}
 }
 
 \p{\code{\verb~|fold~} is the general way to consume matches: \code{\verb~|lexer.fold(source, state)~} with functions as actions, each from a state and a \code{\verb~|TextView~} to a state, or \code{\verb~|lexer.fold_matches(source, state, step)~} with a function \code{\verb~|step~} from a state, a \code{\verb~|Match~} and a \code{\verb~|TextView~} for any action type. \code{\verb~|matches~} is \code{\verb~|fold_matches~} that builds a list.}
@@ -481,11 +497,8 @@ let (counter, words) = counter.fold(source, 0);
 \title{Open questions}
 
 \ul{
-\li{Whether intersection and complement belong in the first version. Paguroidea has them. With them a state can match nothing without being the node \code{\verb~|∅~}, so recognizing that no rule can match any more needs an emptiness test.}
-\li{Whether the first version fills the table on demand, or builds it completely as Paguroidea does and adds filling on demand later.}
 \li{Whether \code{\verb~|Chars~} skips from the first version on, or is matched one character at a time first.}
 \li{What \code{\verb~|Malformed~} should do for input that is not known to be UTF-8: end the match, as here, or count the byte as a unit of its own class.}
 \li{Whether "all matches" should also mean a search for one regex anywhere in the input. That needs an automaton for \code{\verb~|.*r~} and is left to a later version here.}
-\li{What happens at the state limit: an error, or dropping the table and starting it again.}
 }
 }
