@@ -1,0 +1,13 @@
+\title{Vectors read and written through pointers}
+\taxon{Change}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1002}
+\import{base-macros}
+
+\p{\code{\verb~|ptr::load~}, \code{\verb~|ptr::store~}, \code{\verb~|ptr::type_offset~} and \code{\verb~|ptr::advance~} accept a \code{\verb~|Simd~} vector, fixed or scalable, of any number of dimensions. A vector is accessed at the alignment of one lane unless \code{\verb~|load_extended~} or \code{\verb~|store_extended~} sets one. A mask is a byte per lane in memory. See [memory](design-simd-vectors-memory). \pr{1002}.}

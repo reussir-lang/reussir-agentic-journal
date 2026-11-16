@@ -1,0 +1,13 @@
+\title{Vector reductions}
+\taxon{Change}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1001}
+\import{base-macros}
+
+\p{\code{\verb~|core::simd~} gains \code{\verb~|reduce_add~}, \code{\verb~|reduce_mul~}, \code{\verb~|reduce_min~}, \code{\verb~|reduce_max~}, \code{\verb~|reduce_and~}, \code{\verb~|reduce_or~} and \code{\verb~|reduce_xor~}, which combine the lanes of a vector into one value; a vector of several dimensions is flattened first. The floating-point sum and product combine in lane order, and \code{\verb~|reduce_add_reassoc~} and \code{\verb~|reduce_mul_reassoc~} allow any order. Each has a masked form such as \code{\verb~|reduce_add_masked(v, m)~}, in which a masked lane contributes the identity of the combination, see [dec-5088](dec-5088). \pr{1001}.}
