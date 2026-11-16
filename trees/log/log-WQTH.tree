@@ -1,0 +1,13 @@
+\title{Sets and byte classes for a regex module}
+\taxon{Change}
+\date{2026-11-16}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1039}
+\import{base-macros}
+
+\p{The standard library gains \code{\verb~|std::regex::alphabet~}, the first piece of a regex module: \code{\verb~|Bits~}, a set of bytes held as one vector of four 64-bit words; \code{\verb~|ByteClasses~}, the bytes divided into the classes that a group of sets cannot tell apart, with \code{\verb~|whole~}, \code{\verb~|refine~} and \code{\verb~|inside~}; and \code{\verb~|CharSet~}, a set of characters held as the code points where membership changes, on the WAVL map. There is no regex and no matcher yet. See [the design](design-regex-derivatives). \pr{1039}.}

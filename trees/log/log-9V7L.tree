@@ -1,0 +1,13 @@
+\title{Computed vector lane positions on 32-bit targets}
+\taxon{Change}
+\date{2026-11-16}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{compiler}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1040}
+\import{base-macros}
+
+\p{\code{\verb~|simd::extract~} and \code{\verb~|simd::insert~} with a computed index now compile for targets whose \code{\verb~|index~} is 32 bits wide, such as \code{\verb~|wasm32~}. The position was lowered at 64 bits by the upstream vector pass and at 32 bits by the rest of the lowering. See [prob-HP3C](prob-HP3C). \pr{1040}.}
