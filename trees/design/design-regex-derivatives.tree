@@ -141,26 +141,25 @@ let (lexer, token) = lexer.next(text, position);
 }
 
 \subtree[design-regex-derivatives-simd]{
-\title{5. Vector acceleration, and one operation \code{\verb~|core::simd~} lacks}
+\title{5. Vector acceleration with the operations \code{\verb~|core::simd~} has}
 
-\p{When a state is created, the matcher computes the set of bytes on which it loops to itself. If the state has such a loop, it chooses an accelerator:}
+\p{The lookup tables of decision 4 belong to one matcher and are built when the program runs. Vector code cannot be generated per regex the way Paguroidea generates it at compile time, so its shape is fixed and its constants are data.}
+
+\p{When a state is created, the matcher computes the set of bytes on which it loops to itself. If the state has such a loop, it chooses how to skip over a run of those bytes:}
 
 \table{
-\tr{\th{Loop set or its complement}\th{Accelerator}\th{Needs}}
-\tr{\td{a few single bytes and ranges (Paguroidea's bound: cost 4, one per byte, two per range)}\td{compare each chunk with \code{\verb~|splat~} of the bounds, combine with \code{\verb~|&~} and `}\td{\code{\verb~|, ~}first_set`}}
-\tr{\td{any other set}\td{test membership with two 16-entry tables held in vector registers, indexed by the low and the high half of each byte}\td{a shuffle whose indices are a run-time vector}}
-\tr{\td{any other set, scalar}\td{one table of 256 bits}\td{available today}}
+\tr{\th{Loop set or its complement}\th{How the run is skipped}}
+\tr{\td{a few single bytes and ranges (the bound of Paguroidea: cost 4, one per byte, two per range)}\td{compare each chunk with \code{\verb~|splat~} of the stored bytes and bounds, combine the masks with \code{\verb~|&~} and \code{\verb~||~}, and take \code{\verb~|first_set~} of the result}}
+\tr{\td{any other set}\td{one byte at a time through a table of 256 bits stored with the state}}
 }
 
-\p{The second row is the run-time form of a lookup table in a register. \code{\verb~|core::simd::shuffle~} takes its picks as a constant sequence; x86 \code{\verb~|pshufb~}, AArch64 \code{\verb~|tbl~} and RISC-V \code{\verb~|vrgather~} take them from a vector, and LLVM has no target-independent operation for that. Adding one to \code{\verb~|core::simd~} is a separate change to the compiler, to be designed before this row is implemented. The same operation would allow running a whole automaton of at most 16 states as one shuffle per byte.}
-
-\p{The first version uses rows one and three.}
+\p{Both rows use operations that exist. A membership test for an arbitrary set of bytes on a whole vector at once would need a shuffle whose indices are a run-time vector, which \code{\verb~|core::simd~} does not have; it is not part of this design.}
 }
 
 \subtree[design-regex-derivatives-home]{
 \title{6. Where it lives}
 
-\p{A module \code{\verb~|std::regex~}, with nothing in the compiler apart from the shuffle of decision 5.}
+\p{A module \code{\verb~|std::regex~}, with nothing added to the compiler.}
 }
 }
 
