@@ -1,0 +1,32 @@
+\title{rene builds against a stale dependency after another variant was rebuilt}
+\taxon{Problem}
+\date{2026-11-16}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{rene}
+\tag{build}
+\meta{status}{open}
+\meta{created}{2026-11-16}
+\import{base-macros}
+
+\p{\strong{Status:} open; the cause is located, no fix is written.}
+
+\p{After a source file of a path dependency changes, \code{\verb~|rene build~} rebuilds the dependency for the first variant it builds and treats every other variant of it as up to date. A variant is a profile together with whether the target is a fuzzer. The targets of the other variants are then compiled against the old interface and archive. Found on \pr{1039}, which adds a module to \code{\verb~|std~}: in a build directory used before the change, \code{\verb~|rene build --profile release~} on \code{\verb~|tests/integration/std/rene.ncl~} failed with "unknown type" for every name of the new module, and \code{\verb~|std/cow_ordered.rr~}, \code{\verb~|std/cow_seq.rr~} and \code{\verb~|std/option.rr~}, the tests that run this command, failed. An empty build directory is not affected, so CI is not.}
+
+\p{\strong{Demonstration.} One build directory, two builds before the change, two after; the lines are from \code{\verb~|rene -v~}.}
+
+\pre{\verb~|
+rene build --profile release --bin option     # builds std for release
+rene build --profile fuzz --bin wavl          # builds std for fuzz
+touch library/std/src/lib.rr
+rene -v build --profile fuzz --bin wavl
+    building package="std" reason=`library/std/src/lib.rr` changed
+rene -v build --profile release --bin option
+    up to date package="std"
+~}
+
+\p{The same happens inside one command. \code{\verb~|rene build --profile release~} with both ordinary targets and targets marked \code{\verb~|fuzzer = true~} builds the dependencies twice, once for each kind. The first pass reports \code{\verb~|std~} as changed and rebuilds it; the second reports it up to date and compiles the fuzzer targets against the old one.}
+
+\p{\strong{Cause.} \code{\verb~|fresh::record_dep~} writes two records after building a dependency: the build record under \code{\verb~|tables::dep_variant_key(profile, name, fuzzer)~}, one for each variant, and the list of source files with their modification times under \code{\verb~|tables::dep_sources_key(name)~}, one for all variants. \code{\verb~|fresh::dep_state~} compares the files on disk with that one list. Once any variant is rebuilt the list matches the disk again, and the build records of the other variants, which hold no trace of the sources they were built from, pass every remaining check.}
+
+\p{\strong{Direction for a fix.} Keep the source list for each variant, under a key that carries the profile and the fuzzer mark like the build record, or inside the build record itself. A build directory written before the fix then has no list for a variant and rebuilds it once.}
