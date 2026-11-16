@@ -23,7 +23,7 @@
 \li{A matcher holds a list of rules, each a regex with an action. A match names the rule that wins and every other rule that matches the same text. This is the lexer form of Paguroidea: longest match, the earliest rule on a tie, anchored at the current position.}
 \li{Input may arrive in pieces.}
 \li{A regex may use intersection and complement, as in Paguroidea.}
-\li{Transitions are held in one compressed table per matcher, built completely when the rules are turned into a matcher, with vector acceleration for the states that loop on themselves.}
+\li{Transitions are held in flat tables, built completely when the rules are turned into a matcher. A state that loops on itself has a run that is skipped with vector comparisons or through a lookup table that all states share, as in Paguroidea.}
 }
 
 \p{Left to later versions: a pattern parser, search for a match anywhere in the input, captures, lookaround, counted repetition beyond what the builder expands, Unicode property tables and case folding.}
@@ -319,14 +319,31 @@ pub struct Match { start: u64, length: u64, rule: u32, accept: u32 }
 
 \p{Turning the rules into a matcher is the one place where everything is known, so the whole table is built there. Nothing is computed while matching, and a matcher is a value that never changes.}
 
-\p{The table is compressed, and its compression is a property of all states together, which is why it cannot be filled one entry at a time:}
+\p{The tables are flat memory that a match reads through pointers, and they depend on all states together, which is why they cannot be filled one entry at a time:}
 
 \pre{\verb~|
-class_of[byte]                 -> column          256 entries
-row_of[state]                  -> row
-next[row * columns + column]   -> state
-accepting[state]               -> none, or the winning rule and the set of accepting rules
+classes[byte]              -> column           256 bytes
+next[state + column]       -> cell             the number of a state is where its row begins
+first[byte]                -> cell             the row of the start state, a cell for every byte
+winners[state]             -> the earliest rule that accepts
+run_words[state], vectors  -> the run of a state (decision 7)
+lookup                     -> the lookup table that the runs share (decision 7)
 ~}
+
+\p{A row is as long as the number of columns rounded up to a power of two, eight at least. That leaves the three lowest bits of a state number free, and a cell holds in them what reaching its state takes:}
+
+\table{
+\tr{\th{Kind}\th{The state}\th{What the match does}}
+\tr{\td{0}\td{the dead state}\td{ends; the match is the last one found}}
+\tr{\td{1}\td{accepts, and no byte goes on}\td{ends with this state}}
+\tr{\td{2}\td{accepts}\td{takes it as the match so far, then steps}}
+\tr{\td{3}\td{accepts and has a run, and no other byte goes on}\td{reads the run and ends}}
+\tr{\td{4}\td{accepts and has a run}\td{reads the run, takes it as the match so far, then steps}}
+\tr{\td{5}\td{has a run}\td{reads the run, then steps}}
+\tr{\td{6}\td{neither}\td{steps}}
+}
+
+\p{The states are numbered in this order, so the states that accept are one stretch of numbers and the states with a run another, and \code{\verb~|winners~} and the runs are indexed without gaps.}
 
 \p{The steps, in order:}
 
@@ -337,7 +354,7 @@ accepting[state]               -> none, or the winning rule and the set of accep
 \li{\strong{States.} Starting from the vector of the rules' nodes, take the derivative by every class and collect the vectors reached, until no new one appears. This stops with an error above a limit on the number of states, since some regexes have exponentially many.}
 \li{\strong{Dead states.} A state is dead when no accepting state can be reached from it. With every transition known, this is one walk backwards from the accepting states. All dead states become the single dead state.}
 \li{\strong{Columns.} Two classes whose columns are equal in every state are one column. The classes of step 2 come from the sets as written and may be finer than the automaton needs.}
-\li{\strong{Rows.} Two states whose rows are equal share one row.}
+\li{\strong{Kinds and numbers.} Every live state gets its kind, and the states are numbered kind after kind.}
 \li{\strong{Runs.} For every state, the classes on which it loops to itself, and from them its run (decision 7).}
 }
 
@@ -355,15 +372,43 @@ let (source, found) = lexer.next(source);
 
 \p{When the table is built, the matcher computes for every state the bytes on which the state loops to itself, and from them a run. In the loop it skips the run for a state that has one. A state without a run is matched one byte at a time, and nothing else changes.}
 
-\p{A run has two forms. Vector code cannot be generated per regex the way Paguroidea generates it at compile time, so its shape is fixed and its constants are data.}
+\p{The choice of a run is the one Paguroidea's lexer makes. The bytes on which the state loops cost one for a single byte and two for a longer stretch:}
 
 \table{
-\tr{\th{Loop set or its complement}\th{How the run is skipped}}
-\tr{\td{a few single bytes and ranges (the bound of Paguroidea: cost 4, one per byte, two per range)}\td{compare each chunk with \code{\verb~|splat~} of the stored bytes and bounds, combine the masks, and take \code{\verb~|first_set~} of the result}}
-\tr{\td{any other set}\td{one byte at a time through a table of 256 bits stored with the run}}
+\tr{\th{Loop set}\th{How the run is skipped}}
+\tr{\td{costs at most four}\td{sixteen bytes at a time, compared with the vectors of the set, while every byte is in it}}
+\tr{\td{its complement costs at most four}\td{sixteen bytes at a time, compared with the vectors of the complement, while no byte is in it}}
+\tr{\td{neither}\td{through the lookup table, eight bytes at a time and then byte by byte}}
 }
 
-\p{Both rows use operations that exist. A membership test for an arbitrary set of bytes on a whole vector at once would need a shuffle whose indices are a run-time vector, which \code{\verb~|core::simd~} does not have; it is not part of this design.}
+\p{\strong{Vectors.} Paguroidea generates the comparisons of each state; here their shape is one of eight forms and their constants are data. A single byte is one vector, a stretch is two (its first byte, and its length less one, compared after a subtraction), so a form compares with exactly as many vectors as its set costs: one to four bytes; one stretch; one stretch and one or two bytes; two stretches. Every state with a run has four vectors of sixteen bytes at a place computed from its number, so they are read without first reading anything else about the run.}
+
+\p{\strong{The lookup table.} A set that fits neither way is given a number. Set number \code{\verb~|k~} is bit \code{\verb~|k % 8~} of table \code{\verb~|k / 8~}, a table is 256 bytes, and the bit is set in the bytes that leave the state:}
+
+\pre{\verb~|
+lookup[table * 256 + byte] & bit != 0      the byte leaves the state
+~}
+
+\p{Equal sets get one number, whichever states they come from, so eight different sets cost 256 bytes together and a state holds only the place of its table and its bit.}
+
+\p{A membership test for an arbitrary set of bytes on a whole vector at once would need a shuffle whose indices are a run-time vector, which \code{\verb~|core::simd~} does not have; it is not part of this design.}
+
+\p{\strong{What it costs to read tables instead of running generated code.} Measured against a lexer generated by Paguroidea's own \code{\verb~|pag-lexer~} from the token rules of its JSON benchmark, on its \code{\verb~|twitter.json~} (767 kB, 84,083 tokens), both built for baseline x86-64:}
+
+\table{
+\tr{\th{Tokenizer}\th{MB/s}\th{Instructions per token}}
+\tr{\td{Paguroidea, generated code}\td{3,270}\td{69}}
+\tr{\td{this matcher, token loop inlined with it}\td{1,990}\td{91}}
+\tr{\td{this matcher, one \code{\verb~|unsafe_longest~} call per token}\td{1,620}\td{about 175}}
+\tr{\td{this matcher, \code{\verb~|longest~} per token}\td{710}\td{}}
+\tr{\td{this matcher, \code{\verb~|fold~} with a closure}\td{660}\td{about 260}}
+}
+
+\p{By kind of token, in nanoseconds per token with the loop inlined: a one-byte token 0.97 against 0.93; a string of 400 bytes 10.2 against 11.0; a short run (four blanks, a short string, a number) about 5.7 against 3.4. The skip loops are as fast as the generated ones, and a token without a run costs the same. A short run is slower because the vectors are read from memory at a place that depends on the state, which is itself read from a table, where generated code has them as constants.}
+
+\p{Three choices came from measuring. The kind of a state is carried in its cell and jumped on, because comparing the state number against bounds compiled to conditional moves, and the next position then waited for every table read: 2.9 times slower than Paguroidea became 1.6. The start state has a row with a cell for every byte, which makes the first step of a match one read instead of two. Vectors are stored ready and by state number, because building them from bytes costs four instructions each on baseline x86-64 and finding them through the run word costs one more read.}
+
+\p{The two lower rows of the table are not the matcher: a closure that is called in a loop is copied for every call, and \code{\verb~|Option~} is allocated.}
 
 \p{For a text regex, a state that repeats a set of characters loops to itself on the ASCII members of the set only. A character beyond ASCII leaves the state and comes back to it one to three table steps later. So the skip runs through ASCII, and other characters are stepped through the table:}
 
@@ -421,13 +466,19 @@ fn run(lexer, scan, held: TextView) -> (scan, Status)      // Status: Dead or Ex
 window = the pointer and length of `held`
 
 loop {
-    if accepting[state] is a rule   { accepted = (rule, at) }
-    if state has a run              { at = skip(run, window, at) ; if it moved and accepting[state] { accepted = (rule, at) } }
-    if at == window.len             { return Exhausted }
-    to = next[row_of[state] * columns + class_of[byte at `at`]]
-    if to is dead                   { return Dead }
-    state = to ; at = at + 1
+    match cell & 7 {
+        0 => return Dead                                    // the match is `accepted`
+        1 => accepted = (cell, at) ; return Dead
+        6 => step
+        _ => if kind >= 3 { at = skip(cell, window, at) }
+             if kind != 5 { accepted = (cell, at) }
+             if kind == 3 { return Dead } else { step }
+    }
 }
+
+step:
+    if at == window.len             { return Exhausted }
+    cell = next[(cell & !7) + classes[byte at `at`]] ; at = at + 1
 ~}
 
 \p{\code{\verb~|Dead~} means no rule can match further: the result is \code{\verb~|accepted~}. \code{\verb~|Exhausted~} means the window ended while some rule could still match.}
@@ -436,23 +487,22 @@ loop {
 \subtree[design-regex-derivatives-skip]{
 \title{The skip}
 
-\p{For a state that loops on the bytes \code{\verb~|[a-z]~}, the skip is this function. The bounds \code{\verb~|lo~} and \code{\verb~|hi~} are fields of the state's run.}
+\p{For a state that loops on the bytes \code{\verb~|[a-z]~}, the skip is this function. \code{\verb~|first~} and \code{\verb~|span~} are two of the vectors of the state: sixteen times \code{\verb~|a~}, and sixteen times 25.}
 
 \pre{\verb~|
-fn skip(lo: u8, hi: u8, base: ConstPtr<Generic>, at: u64, len: u64) -> u64 {
-    let width = simd::lanes<Simd<[u8; [16]]>>();
-    let (end, stop) = while [i = at, stop = false] (i < len && !stop) {
-        let live   = simd::mask_first<Simd<[bool; [16]]>>(len - i);
-        let chunk  = simd::load<Simd<[u8; [16]]>>(ptr::offset(base, i as i64, PtrArithFlag::Inbounds), live, simd::splat<Simd<[u8; [16]]>>(0));
-        let inside = simd::ge(chunk, simd::splat<Simd<[u8; [16]]>>(lo)) & simd::le(chunk, simd::splat<Simd<[u8; [16]]>>(hi));
-        let run    = simd::first_set(!(inside & live));      // bytes of the run at the front of this chunk
-        (i + run, run < width)
+fn stretched(vectors: ConstPtr<Generic>, inside: bool, bytes: ConstPtr<Generic>, at: u64, length: u64) -> u64 {
+    let first = chunk_at(vectors, 0);
+    let span = chunk_at(vectors, 16);
+    let (reached, _) = while [at = at, going = true] (going && at + 16 <= length) {
+        let hit = simd::le(simd::sub(chunk_at(bytes, at), first), span);
+        let leaving = if inside { simd::not(hit) } else { hit };
+        if simd::any(leaving) { (at + simd::first_set(leaving), false) } else { (at + 16, true) }
     };
-    end
+    reached
 }
 ~}
 
-\p{\code{\verb~|first_set~} of the complement counts the leading bytes that are both loaded and in the set, so \code{\verb~|end~} is the first position whose byte is outside the set, or \code{\verb~|len~}. The vectors are local to one iteration; the loop carries only \code{\verb~|i~}.}
+\p{The loop carries only the position. Fewer than sixteen bytes at the end of the input are read one at a time through the table, so the skip always stops at the first byte that leaves the state or at the end. A match that ends after its run (kind 3) relies on that.}
 }
 
 \subtree[design-regex-derivatives-source]{
