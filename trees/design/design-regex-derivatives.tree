@@ -84,7 +84,7 @@ space  = ' '+          action: Token::Space
 \p{The matcher always reads bytes. An alphabet tells, for a position, how many bytes the unit there takes and which class it is in. The regex tree, the node table and the matcher are generic in the alphabet; the trait is given in decision 5.}
 
 \ul{
-\li{\code{\verb~|Bytes~}: a unit is one byte. A set is 256 bits.}
+\li{\code{\verb~|Bytes~}: a unit is one byte. A set is 256 bits, four 64-bit words in one \code{\verb~|Simd<[u64; 4]>~}.}
 \li{\code{\verb~|Chars~}: a unit is one character, decoded from UTF-8 in the matching loop, one to four bytes. A set is held as the code points where membership changes; see below.}
 }
 
@@ -159,7 +159,7 @@ the classes it leaves     0 → 0,    61 → 1,   7B → 0,    3B1 → 1,   3CA 
 \tr{\td{classes of bytes: refine with 24 ranges, then inside}\td{0.99}\td{1.06}\td{1.01}\td{1.05}}
 }
 
-\p{A \code{\verb~|u128~} is two 64-bit registers, so the bitwise functions are the same instructions; ranges clip two words where four were clipped and are somewhat faster, and equality is longer. The vector is two to ten times faster wherever a set is built or tested, and 5 to 6 percent slower in the classes of bytes, where the smallest member is asked for often. The vector is the better fit, and it is not used yet: membership and the smallest member take a lane by a computed index, which does not compile for a 32-bit target, see [prob-HP3C](prob-HP3C). The bitwise loop varies by a quarter between builds of the same code and decides nothing.}
+\p{A \code{\verb~|u128~} is two 64-bit registers, so the bitwise functions are the same instructions; ranges clip two words where four were clipped and are somewhat faster, and equality is longer. The vector is two to ten times faster wherever a set is built or tested, and 5 to 6 percent slower in the classes of bytes, where the smallest member is asked for often. The vector is the better fit and is what \code{\verb~|Bits~} uses. Membership and the smallest member take a lane by a computed index, which did not compile for a 32-bit target, see [prob-HP3C](prob-HP3C); \pr{1039} is therefore stacked on the fix, \pr{1040}. The bitwise loop varies by a quarter between builds of the same code and decides nothing.}
 }
 
 \subtree[design-regex-derivatives-actions]{

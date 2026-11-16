@@ -9,7 +9,7 @@
 \meta{created}{2026-11-16}
 \import{base-macros}
 
-\p{\strong{Status:} open; the cause is located, no fix is written.}
+\p{\strong{Status:} open; a fix is in review as \pr{1040}.}
 
 \p{\code{\verb~|core::simd::extract~} is documented to take a computed index into the last dimension. For \code{\verb~|wasm32-wasip1~} such a call fails in the last step of code generation. Found while trying a vector of four 64-bit words as the representation of \code{\verb~|std::regex::alphabet::bits::Bits~} for \pr{1039}: the standard library then no longer builds for WebAssembly.}
 
@@ -39,4 +39,6 @@ error: LLVM Translation failed for operation: builtin.unrealized_conversion_cast
 
 \p{\strong{Cause.} Two conversions disagree on the width of \code{\verb~|index~}. Reussir's own lowering takes it from the data layout, 32 bits where pointers are 32 bits (\code{\verb~|buildLowerOptions~} in \code{\verb~|lib/Conversion/TypeConverter/TypeConverter.cpp~}), so \code{\verb~|arith.index_castui~} becomes a truncation to \code{\verb~|i32~}. The upstream \code{\verb~|convert-vector-to-llvm~} pass is created with its default options in \code{\verb~|reussirCreateConvertVectorToLLVMPass~} (\code{\verb~|lib/CAPI/Passes.cpp~}), builds its own type converter with a 64-bit \code{\verb~|index~}, and lowers the position of \code{\verb~|vector.extract~} to \code{\verb~|i64~}. The two casts between them do not cancel.}
 
-\p{\strong{Direction for a fix.} The pass options of \code{\verb~|convert-vector-to-llvm~} have no index width. The vector patterns can be populated with the type converter the rest of the lowering uses, in a pass of Reussir's own, so every conversion reads one width.}
+\p{\strong{Upstream.} From llvm/llvm-project#206380 on, \code{\verb~|convert-vector-to-llvm~} builds its options from the data layout of the module. The pinned MLIR 23.1.3 does not have that change, and the data layout Reussir attaches carries no entry for \code{\verb~|index~} yet.}
+
+\p{\strong{Fix, \pr{1040}.} \code{\verb~|reussir-lowering-basic-ops~} runs right before the upstream pass and holds the type converter of the target. Where \code{\verb~|index~} is not 64 bits wide it converts \code{\verb~|vector.extract~} and \code{\verb~|vector.insert~} at a computed position with the upstream patterns under that converter; every other operation is left to the upstream pass, and a 64-bit target is not touched. Among the SIMD tests only computed positions were affected. \code{\verb~|simd_construct.rr~} is now also compiled for \code{\verb~|wasm32-unknown-unknown~}.}
