@@ -1,0 +1,13 @@
+\title{Vector shape operations}
+\taxon{Change}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1005}
+\import{base-macros}
+
+\p{\code{\verb~|core::simd~} gains \code{\verb~|shape_cast~}, \code{\verb~|bitcast~}, \code{\verb~|broadcast~}, \code{\verb~|transpose~}, \code{\verb~|shuffle~}, \code{\verb~|interleave~}, \code{\verb~|deinterleave_even~}, \code{\verb~|deinterleave_odd~}, \code{\verb~|slice~}, \code{\verb~|insert_slice~}, \code{\verb~|scalable_extract~}, \code{\verb~|scalable_insert~} and \code{\verb~|outer~}. Positions such as the order of a transpose or the picks of a shuffle are constant sequences, checked against the extents when the program is checked. See [operations on values](design-simd-vectors-ops). \pr{1005}.}

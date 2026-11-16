@@ -1,0 +1,13 @@
+\title{Gather, scatter, expanding load and compressing store}
+\taxon{Change}
+\date{2026-11-15}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{language}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1004}
+\import{base-macros}
+
+\p{\code{\verb~|simd::gather~} and \code{\verb~|simd::scatter~} read and write lane i at the element given by lane i of an index vector, counted from a base pointer. \code{\verb~|simd::load_expand~} places consecutive elements of memory in the set lanes of a mask, and \code{\verb~|simd::store_compress~} writes the set lanes consecutively, which packs what a filter keeps. All four take one-dimensional vectors of numbers. See [memory](design-simd-vectors-memory). \pr{1004}.}
