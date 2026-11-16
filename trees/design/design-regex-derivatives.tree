@@ -319,7 +319,7 @@ pub struct Match { start: u64, length: u64, rule: u32, accept: u32 }
 
 \p{Turning the rules into a matcher is the one place where everything is known, so the whole table is built there. Nothing is computed while matching, and a matcher is a value that never changes.}
 
-\p{The tables are flat memory that a match reads through pointers, and they depend on all states together, which is why they cannot be filled one entry at a time:}
+\p{The tables are flat native arrays, read with \code{\verb~|array::get~}, and they depend on all states together, which is why they cannot be filled one entry at a time. Raw pointers are used only for the bytes of the input and to read the vectors of a run whole:}
 
 \pre{\verb~|
 classes[byte]              -> column           256 bytes
@@ -397,18 +397,15 @@ lookup[table * 256 + byte] & bit != 0      the byte leaves the state
 
 \table{
 \tr{\th{Tokenizer}\th{MB/s}\th{Instructions per token}}
-\tr{\td{Paguroidea, generated code}\td{3,270}\td{69}}
-\tr{\td{this matcher, token loop inlined with it}\td{1,990}\td{91}}
-\tr{\td{this matcher, one \code{\verb~|unsafe_longest~} call per token}\td{1,620}\td{about 175}}
-\tr{\td{this matcher, \code{\verb~|longest~} per token}\td{710}\td{}}
-\tr{\td{this matcher, \code{\verb~|fold~} with a closure}\td{660}\td{about 260}}
+\tr{\td{Paguroidea, generated code}\td{3,370}\td{69}}
+\tr{\td{this matcher, one \code{\verb~|unsafe_longest~} call per token}\td{1,390}\td{188}}
+\tr{\td{this matcher, \code{\verb~|longest~} per token}\td{650}\td{}}
+\tr{\td{this matcher, \code{\verb~|fold~} with a closure}\td{610}\td{340}}
 }
 
-\p{By kind of token, in nanoseconds per token with the loop inlined: a one-byte token 0.97 against 0.93; a string of 400 bytes 10.2 against 11.0; a short run (four blanks, a short string, a number) about 5.7 against 3.4. The skip loops are as fast as the generated ones, and a token without a run costs the same. A short run is slower because the vectors are read from memory at a place that depends on the state, which is itself read from a table, where generated code has them as constants.}
+\p{By kind of token, in nanoseconds per token through \code{\verb~|unsafe_longest~}, each averaged with the one-byte token that follows it: four blanks 4.8 against 2.1; a string of 8 bytes 5.2 against 2.1; of 400 bytes 9.2 against 8.8. The skip loops are as fast as the generated ones, and the difference is a fixed cost per token. It has four parts. Every \code{\verb~|array::get~} checks its bound and moves the reference count of the array: with the tables read through pointers the same call ran at 1,620 MB/s. The call is not inlined across packages: a counting loop compiled together with the matcher, on the pointer version, ran at 1,990 MB/s with 91 instructions per token. A closure that is called in a loop is copied for every call, and \code{\verb~|Option~} is allocated. And the vectors of a run are read from memory at a place that depends on a state that was itself just read, where generated code has constants.}
 
 \p{Three choices came from measuring. The kind of a state is carried in its cell and jumped on, because comparing the state number against bounds compiled to conditional moves, and the next position then waited for every table read: 2.9 times slower than Paguroidea became 1.6. The start state has a row with a cell for every byte, which makes the first step of a match one read instead of two. Vectors are stored ready and by state number, because building them from bytes costs four instructions each on baseline x86-64 and finding them through the run word costs one more read.}
-
-\p{The two lower rows of the table are not the matcher: a closure that is called in a loop is copied for every call, and \code{\verb~|Option~} is allocated.}
 
 \p{For a text regex, a state that repeats a set of characters loops to itself on the ASCII members of the set only. A character beyond ASCII leaves the state and comes back to it one to three table steps later. So the skip runs through ASCII, and other characters are stepped through the table:}
 
