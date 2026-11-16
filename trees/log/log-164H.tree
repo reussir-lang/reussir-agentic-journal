@@ -1,0 +1,13 @@
+\title{A tuple taken apart in a loop body no longer leaks}
+\taxon{Change}
+\date{2026-11-16}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{compiler}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1045}
+\import{base-macros}
+
+\p{A reference-counted value taken out of a tuple inside a \code{\verb~|while~} body, including the result of a loop inside a loop, is released at its last use. Before, one count was left in every round. See [prob-NQ7X](prob-NQ7X). \pr{1045}.}

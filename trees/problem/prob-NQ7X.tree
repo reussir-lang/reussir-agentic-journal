@@ -1,0 +1,42 @@
+\title{A tuple taken apart in a loop body leaks the part taken out}
+\taxon{Problem}
+\date{2026-11-16}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{compiler}
+\tag{ownership}
+\meta{status}{closed}
+\meta{completed}{2026-11-16}
+\meta{created}{2026-11-16}
+\import{base-macros}
+
+\p{\strong{Status:} closed by \pr{1045}.}
+
+\p{A reference-counted value taken out of a tuple inside a \code{\verb~|while~} body was never released: one count was left in every round, at every optimization level. Found while fuzzing the regex automaton of \pr{1044}, where 30,000 runs in one process ran out of memory although each input alone took a millisecond and 34 MB.}
+
+\p{\strong{Demonstration.}}
+
+\pre{\verb~|
+enum Cells { End, Cell(u64, Cells) }
+
+pub fn rounds(count: u64) -> u64 {
+    let (_, sum) = while [i = 0, sum = 0] (i < count) {
+        let (_, cells) = pair();              // a tuple taken apart in the loop body
+        (i + 1, sum + length(cells, 0))       // the last use of `cells`
+    };
+    sum
+}
+~}
+
+\table{
+\tr{\th{Shape}\th{Peak memory at 100,000 rounds}\th{At 400,000 rounds}}
+\tr{\td{a tuple taken apart in the loop body, as above}\td{154 MB}\td{605 MB}}
+\tr{\td{the same inside a block in the loop body}\td{154 MB}\td{605 MB}}
+\tr{\td{a \code{\verb~|while~} loop inside the loop body, whose result is taken apart}\td{304 MB at 200,000}\td{1,207 MB at 800,000}}
+\tr{\td{a plain \code{\verb~|let cells = build()~} in the loop body}\td{4.8 MB}\td{4.8 MB}}
+\tr{\td{the tuple taken apart in a function called from the loop}\td{4.8 MB}\td{4.8 MB}}
+}
+
+\p{\strong{Cause.} A destructuring \code{\verb~|let~} lowers to a block in statement position, and the statements after it use its bindings: \code{\verb~|{ let v11 = pair(); let v12 = proj(v11, 1) }; .. length(v12, 0) ..~}. In the ownership analysis the free variables of a sequence subtracted only the \code{\verb~|let~}s written directly in it, so \code{\verb~|v12~} counted as free in the loop body. The \code{\verb~|while~} rule takes the free variables of the body as captures that must survive every round: the last use of \code{\verb~|v12~} got a \code{\verb~|dup~}, and a \code{\verb~|drop~} was placed once after the loop.}
+
+\p{\strong{Fix, \pr{1045}.} The bindings of a block in statement position count as bound for the statements after it (\code{\verb~|bind_statement~} in \code{\verb~|crates/reussir-core/src/full/ownership.rs~}). A unit test builds the shape and runs the checker that interprets the counts; it failed with one count left after each round and passes now. After the fix every row of the table is 4.8 MB.}

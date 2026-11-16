@@ -1,0 +1,13 @@
+\title{Regex nodes and their derivatives}
+\taxon{Change}
+\date{2026-11-16}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1043}
+\import{base-macros}
+
+\p{\code{\verb~|std::regex::node~} holds regexes as nodes of a table. Every constructor applies the rewrite rules and then looks the result up among the existing nodes, so equal regexes are the same number. \code{\verb~|derive~} gives the derivative of a node by a class of bytes, \code{\verb~|add~} the node of a \code{\verb~|ByteRegex~}, and \code{\verb~|refine~} the classes of its sets. See [normalization](design-regex-derivatives-normalization). \pr{1043}.}
