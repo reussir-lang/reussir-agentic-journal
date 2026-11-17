@@ -469,11 +469,30 @@ low[byte & 15] & high[byte >> 4] & bits != 0      the byte is in the set
 \ul{
 \li{\code{\verb~|explore~} keeps a table of states whose one growing operation is \code{\verb~|allocate(nodes)~}: it answers the number of the state and enters a new state under its nodes.}
 \li{\code{\verb~|lookahead~} keeps a \code{\verb~|LoopOptimizer~}, named after Paguroidea's: runs are added one after another, and \code{\verb~|assign_table~} gives a set its bit in the lookup tables that all runs share. The two other ways to skip a run are the modules \code{\verb~|vectors~} and \code{\verb~|shuffle~}.}
+\li{\code{\verb~|arrange~} holds every table whose size is known before it is filled as a native array: the first state of each of the seven kinds as \code{\verb~|[u64; 7]~}, and the kinds, the transitions and the winning rules as \code{\verb~|[u32; ?]~}. Each is filled by a function that calls itself with the array updated. The final number of every state is collected by pushing and stays a \code{\verb~|Vec~}.}
 \li{\code{\verb~|encoding~} is the one place that packs and unpacks a cell of the table and the word of a run.}
 \li{\code{\verb~|scan~} is matching, \code{\verb~|stream~} the matches pulled one after another, \code{\verb~|inspect~} the functions that look at an automaton one step at a time, and \code{\verb~|native~} the loops that read the input through a pointer.}
 }
 
 \p{The split was checked against the single module it replaced: both builds of random rule lists gave equal arrays, and the matching loop compiled to the same instructions.}
+
+\p{One run of \code{\verb~|arrange~} on a lexer of 300 keywords, a name, a number and blanks, in instructions counted by callgrind (x86-64, \code{\verb~|-O aggressive~}):}
+
+\table{
+\tr{\th{Tables}\th{Filled by}\th{Instructions}}
+\tr{\td{\code{\verb~|Vec~}}\td{\code{\verb~|while~}}\td{34.90 million}}
+\tr{\td{native arrays}\td{\code{\verb~|while~}}\td{21.96 million}}
+\tr{\td{native arrays}\td{recursion}\td{21.81 million}}
+}
+
+\p{The arrays give the difference; recursion and \code{\verb~|while~} tie. For a function that calls itself with its array updated, the compiler makes a clone that assumes the array unique on entry. Two small fills show what that buys:}
+
+\ul{
+\li{A fill that computes each value from the index alone loses the uniqueness test before \code{\verb~|array::set~} and the copy it guards: 58 lines of LLVM IR, against 199 for the same fill written with \code{\verb~|while~}, which keeps both.}
+\li{A fill that reads each value from a second array keeps the test and the copy in both forms, and the recursive form also raises and lowers the count of the second array in every round. The fills of \code{\verb~|arrange~} read their values from a \code{\verb~|Vec~} and are of this sort: the compiled function still has one copy path for each of its three large arrays.}
+}
+
+\p{In an unoptimized build a function that calls itself makes an ordinary call, so the depth of the stack is the number of rounds. The fill of the transitions uses 288 bytes of stack for each cell there. The search for live states in \code{\verb~|classify~} is written the same way, and on the lexer above it is the first to run out of an 8 MB stack in an unoptimized build, after 42,700 calls.}
 }
 }
 
