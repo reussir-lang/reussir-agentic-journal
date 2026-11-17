@@ -13,7 +13,8 @@
 \ul{
 \li{\strong{Design note.} [A walker and an iterator for WavlMap](design-wavl-walker), a draft with the prototype, the measurements and the open questions.}
 \li{\strong{Result.} Feasible for the map with a small change, and about twice as fast for set algebra on \code{\verb~|CharSet~}; an iterator helps comparisons; a plain traversal and a long run of removals do not gain. The set was only analysed.}
-\li{\strong{Not done.} No pull request. The prototype is not tuned, has no tests of its own beyond agreement with the existing operations on the timed workloads, and was compiled with a compiler built on 2026-11-13, older than the library it compiled.}
+\li{\strong{Pull request.} The maintainer accepted the walker and the iterator for the map. \pr{1051} adds them with unit cases and a fuzz target, opened as a draft; changelog entry [log-H381](log-H381).}
+\li{\strong{Not done.} The walker is not tuned. \code{\verb~|CharSet~} and the equality of maps still use the earlier operations. Local runs used a compiler built on 2026-11-13, older than the library it compiled.}
 }
 
 \p{One timing was wrong at first and was repeated: the checksum of the window removals called \code{\verb~|depth~}, which visits every node, so both forms measured the same. The note has the repeated numbers.}
