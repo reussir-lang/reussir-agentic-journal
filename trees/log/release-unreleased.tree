@@ -32,6 +32,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-YG59}
 \transclude{log-2R2L}
 \transclude{log-H381}
 \transclude{log-SZER}

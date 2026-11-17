@@ -23,4 +23,6 @@
 
 \p{\strong{Regex.} \pr{1057} uses the iterator in \code{\verb~|CharSet~} and the UTF-8 translation, on top of \pr{1052}; changelog entry [log-2R2L](log-2R2L), measurements in [the note](design-wavl-walker-regex). \pr{1056}, opened only to run CI over two pull requests, was closed as pointless: a stacked pull request has its own CI.}
 
+\p{\strong{Lists.} Asked whether the lists of entries in \code{\verb~|CharSet~} were needed, the session replaced the three of whole sets in \pr{1057} with folds and the iterator, and kept the three of a range, which measured as cheaper than stepping without them. The reads of \code{\verb~|cut~} that kept its map held became \pr{1058}, [log-YG59](log-YG59).}
+
 \p{One timing was wrong at first and was repeated: the checksum of the window removals called \code{\verb~|depth~}, which visits every node, so both forms measured the same. The note has the repeated numbers.}

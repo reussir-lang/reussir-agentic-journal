@@ -144,7 +144,7 @@
 \li{The intersection reading the larger set through the walker: 18 percent faster for two sets of 1,000 stretches, 4 percent slower for \code{\verb~|[A-Za-z0-9_]~}. Sets in a regex are mostly small.}
 }
 
-\p{Not in the pull request, and measured on top of it: \code{\verb~|cut~} reads the two neighbouring stretches after it has removed the stretches inside the range, so the map it removes from is still held and every removal copies its path. Reading them first takes the complement from 48.6 to 33.2 and the small set against the large one from 340.2 to 283.2.}
+\p{Found on the way and proposed apart, as \pr{1058}: \code{\verb~|cut~} read the two neighbouring stretches after it had removed the stretches inside the range, so the map it removed from was still held and every removal copied its path. With the reads first, against the main branch, the complement goes from 53.8 to 37.3, a difference from 55.8 to 50.9 and the small set against the large one from 386.6 to 340.2; union and intersection run the same instructions. See [log-YG59](log-YG59).}
 }
 
 \subtree[design-wavl-walker-findings]{
