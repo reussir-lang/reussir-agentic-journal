@@ -19,4 +19,6 @@
 
 \p{\strong{The suite.} Asked whether the third and fourth steps are a gain, and told that the path form had made insertion worse, the session ran the ordered-map benchmarks of the benchmark suite for recursion, the main branch and the stack. The stack does not change them; the path form is slower than recursion for a map with one owner. Recorded in [the note](design-wavl-walker-suite) and as an insight listed under [insights](insights).}
 
+\p{\strong{Decision.} On those results the maintainer had the change to the repairs and the changes through a walker closed, as not required for a walker: [dec-DR32](dec-DR32). \pr{1051} and \pr{1052} remain, with \pr{1056} for CI over both.}
+
 \p{One timing was wrong at first and was repeated: the checksum of the window removals called \code{\verb~|depth~}, which visits every node, so both forms measured the same. The note has the repeated numbers.}

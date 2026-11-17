@@ -10,7 +10,7 @@
 \meta{updated}{2026-11-17}
 \import{base-macros}
 
-\p{\strong{Status:} accepted for the map, and in review as a stack of four pull requests, see [the stack](design-wavl-walker-stack). The note began as a study with a prototype; the measurements below are of that prototype. Source: [the session](ses-Z19Y).}
+\p{\strong{Status:} accepted for a walker that moves and reads and for the iterator, in review as \pr{1051} and \pr{1052}. Changing a map through the walker is not part of it, see [dec-DR32](dec-DR32). The note began as a study with a prototype that could also change the map; the measurements below are of that prototype. Source: [the session](ses-Z19Y).}
 
 \p{The question is whether \code{\verb~|WavlMap~} and \code{\verb~|WavlSet~} should offer two things. A \em{walker} is a map opened at a position: it moves to another key, reads or changes the entry there, and closes into a map again. An \em{iterator} yields the entries one at a time, least key first. The case that raised the question is \code{\verb~|CharSet~} after \pr{1049}: each of its operations makes several separate descents from the root, namely two \code{\verb~|floor_entry~} calls, a \code{\verb~|range_to_list~}, one \code{\verb~|remove~} per stretch and an \code{\verb~|insert~}.}
 
@@ -32,18 +32,18 @@
 }
 
 \subtree[design-wavl-walker-stack]{
-\title{The stack}
+\title{The pull requests}
 
-\p{The prototype is proposed in four steps, so that the change to the existing repairs can be reviewed apart from the new functions.}
+\p{The prototype was first opened as one pull request and then split into four, so that the change to the existing repairs could be judged apart from the new functions.}
 
 \ol{
-\li{\pr{1051}: the walker that moves and reads. No existing function is changed; \code{\verb~|Path~} becomes public.}
-\li{\pr{1052}: the iterator.}
-\li{\pr{1053}: the repairs return where they stopped. This is the only change to existing code, and it adds no public function.}
-\li{\pr{1054}: \code{\verb~|put~} and \code{\verb~|remove~} on the walker, which need the third step.}
+\li{\pr{1051}: the walker that moves and reads. No existing function is changed; \code{\verb~|Path~} becomes public. In review.}
+\li{\pr{1052}: the iterator. In review.}
+\li{\pr{1053}: the repairs return where they stopped, the only change to existing code. Closed.}
+\li{\pr{1054}: \code{\verb~|put~} and \code{\verb~|remove~} on the walker, which need the third. Closed.}
 }
 
-\p{\pr{1055} runs CI over the whole stack and is not for merging. Against the prototype the stack adds \code{\verb~|prev~} and \code{\verb~|last~}, the mirrors of \code{\verb~|next~} and \code{\verb~|first~}, and tests: unit cases for the walker and the iterator, and a fuzz target that makes the same moves and changes through a walker and through the map operations and compares what the walker reads at every step. \code{\verb~|CharSet~} and the equality of maps are not moved onto them in the stack.}
+\p{The last two were closed by [dec-DR32](dec-DR32). \pr{1056} runs CI over the first two and is not for merging. Against the prototype the two add \code{\verb~|prev~} and \code{\verb~|last~}, the mirrors of \code{\verb~|next~} and \code{\verb~|first~}, and tests: unit cases for the walker and the iterator, and a fuzz target that moves a walker and compares what it reads at every step with the map operations.}
 }
 
 \subtree[design-wavl-walker-ownership]{
@@ -128,7 +128,6 @@
 \title{Open questions}
 
 \ul{
-\li{Whether the cost of the third step on \code{\verb~|insert~} and \code{\verb~|remove~} is accepted for the changes through a walker. The alternatives are repairs of its own for the walker, which doubles that code, or a walker that only reads.}
 \li{The interface: what a position is called, whether \code{\verb~|seek~} may move in both directions as in the prototype, and how the end of the map is told from a gap.}
 \li{Whether a run of keys is removed by a walker operation or by split and join on the map. Split falls out of a path: the items entered on the right hold what is below the position and the others what is above.}
 \li{Union and intersection as a merge of two entry lists followed by a linear build from sorted input were not measured. They do not need a walker and take time in the sum of both sizes, where a sweep takes time in the smaller size and the logarithm of the ratio.}

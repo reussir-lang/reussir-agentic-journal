@@ -1,0 +1,20 @@
+\title{The walker of \code{\verb~|WavlMap~} reads; \code{\verb~|insert~} and \code{\verb~|remove~} stay as they are}
+\taxon{Decision}
+\date{2026-11-17}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{stdlib}
+\meta{status}{accepted}
+\meta{created}{2026-11-17}
+\import{base-macros}
+
+\p{\strong{Status:} accepted. \pr{1053} and \pr{1054} are closed; \pr{1051} and \pr{1052} remain.}
+\p{\strong{Context.} [The walker](design-wavl-walker) was first proposed with operations that change the map at the walker's position. Those need the repairs of \code{\verb~|insert~} and \code{\verb~|remove~} to return where they stopped instead of rebuilding to the root, a change to code that every user of the map runs. The request was for a walker and an iterator, not for a change to insertion.}
+\p{\strong{Decision.} The walker moves and reads, and the iterator yields entries. The repairs and the update functions of the map are not changed for them.}
+\p{\strong{Why.}}
+\ul{
+\li{The change to the repairs has no gain of its own: it costs \code{\verb~|insert~} and \code{\verb~|remove~} about half a percent of their instructions, and the ordered-map benchmarks of the suite do not move, see [the measurements](design-wavl-walker-suite).}
+\li{The gain of changing a map through a walker was measured only in a prototype of \code{\verb~|CharSet~} that is in no pull request.}
+\li{The path form of the updates, on which such a change would build further, is itself slower than recursion for a map with one owner, see [ins-I5QL](ins-I5QL). How the map inserts is a question of its own and is not to be settled inside a change that adds a walker.}
+}
+\p{\strong{Consequences.} A sweep that changes several entries, as in the set algebra of \code{\verb~|CharSet~}, still descends from the root for each change. If that is taken up again, it starts from a client in the tree that shows the gain, and as a pull request of its own.}
