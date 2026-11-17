@@ -486,7 +486,12 @@ let (rest, found) = matches.next();
 \tr{\td{one \code{\verb~|unsafe_longest~} call for each match}\td{1,378}\td{1,700}\td{821}}
 \tr{\td{\code{\verb~|fold~} with a closure}\td{643}\td{848}\td{641}}
 \tr{\td{one \code{\verb~|longest~} call for each match}\td{510}\td{688}\td{498}}
+\tr{\td{Rust \code{\verb~|regex-automata~} dense DFA, stepped by hand}\td{652}\td{}\td{594}}
+\tr{\td{Rust \code{\verb~|regex-automata~} dense DFA, one anchored search for each match}\td{515}\td{}\td{399}}
+\tr{\td{Rust \code{\verb~|regex~} engine, one anchored search for each match}\td{297}\td{}\td{294}}
 }
+
+\p{Paguroidea generates its code when the program is compiled. The Rust rows are the counterpart that is built when the program runs, as this automaton is: the same twelve rules as patterns of \code{\verb~|regex-automata~} 0.4, the engine of the \code{\verb~|regex~} crate, giving the same tokens. That engine is made for searching and pays a setup for every anchored search; stepping its dense DFA by hand leaves that out, and also its skipping. The Rust program is built with LTO, so the fat-LTO column is the like-for-like one.}
 
 \p{A matcher is measured by one scan of a long text with the setup done once. A driver that makes one call for each match measures the call.}
 
