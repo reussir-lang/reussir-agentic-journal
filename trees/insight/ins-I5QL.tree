@@ -1,0 +1,18 @@
+\title{The path form of \code{\verb~|WavlMap~} updates runs fewer instructions than recursion and mispredicts more}
+\taxon{Insight}
+\date{2026-11-17}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{stdlib}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the session](ses-Z19Y), measured for [the walker](design-wavl-walker). Verified on one machine.}
+\p{\pr{567} moved the updates of \code{\verb~|WavlMap~} from recursion to a saved path, and measured the path form as the fastest. With a compiler built on 2026-11-13 that no longer holds for a map with one owner. The recursive file from before \pr{567}, with its wrappers binding size and root first as that pull request also did, was put into the library of the main branch and run against it on the three ordered-map benchmarks of the benchmark suite; means of 10 runs in milliseconds on an EPYC 7773X:}
+\table{
+\tr{\th{Benchmark}\th{recursion}\th{path}\th{path / recursion}}
+\tr{\td{\code{\verb~|ordered-map-linear~}}\td{724.6}\td{791.9}\td{1.09}}
+\tr{\td{\code{\verb~|ordered-map-shared~}}\td{1060.9}\td{1056.3}\td{1.00}}
+\tr{\td{\code{\verb~|ordered-map-heavily-shared~}}\td{1336.3}\td{1235.3}\td{0.92}}
+}
+\p{On the linear benchmark the path form runs 2,269 million instructions where recursion runs 2,827 million, and still takes 2,682 million cycles against 2,490 million: it mispredicts 45.4 million branches against 31.0 million. Rebuilding matches on whether each path item was entered on the left or the right, which follows the key and cannot be predicted; a recursive return has no such branch. When versions are kept, every update allocates its path anyway, and the path form's shorter code wins. Count cycles and branch misses, not instructions, when comparing the two forms.}

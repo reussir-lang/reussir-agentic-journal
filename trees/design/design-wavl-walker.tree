@@ -90,6 +90,21 @@
 \p{The change to the repairs has no gain of its own and costs the existing operations a little. Library without the prototype against library with it, medians of 7 runs: 1,000,000 inserts and 750,000 removals on a map with one owner take 542.3 and 546.1; 2,000,000 inserts and removals that each copy their path from a kept map take 593.3 and 601.2. The ranges of the runs overlap, but the counts of \code{\verb~|perf stat~} do not: instructions rise by 0.6 and 0.5 percent, cycles by 0.8 and 2.0 percent, which is 6 to 14 instructions per operation. The repair returns two words to its caller, which then rebuilds, where before the repair rebuilt.}
 }
 
+\subtree[design-wavl-walker-suite]{
+\title{The ordered-map benchmarks of the suite}
+
+\p{The three ordered-map benchmarks of the benchmark suite were built with the suite's own compile step and run for the main branch and for the top of [the stack](design-wavl-walker-stack). Means of 10 runs in milliseconds, with the least and greatest run, on an EPYC 7773X; compiler built on 2026-11-13.}
+
+\table{
+\tr{\th{Benchmark}\th{main}\th{stack}\th{instructions, main and stack, in millions}}
+\tr{\td{\code{\verb~|ordered-map-linear~}}\td{791.9, 778.3 to 819.2}\td{783.8, 781.3 to 786.6}\td{2,269.2 and 2,271.1}}
+\tr{\td{\code{\verb~|ordered-map-shared~}}\td{1056.3, 1050.2 to 1072.0}\td{1059.6, 1055.1 to 1069.5}\td{3,672.1 and 3,673.8}}
+\tr{\td{\code{\verb~|ordered-map-heavily-shared~}}\td{1235.3, 1232.3 to 1242.8}\td{1239.1, 1231.4 to 1257.5}\td{4,555.7 and 4,557.4}}
+}
+
+\p{The stack neither gains nor loses here: these programs do not use a walker, and the cost of the third step is below one part in a thousand of their instructions. The gain measured for the walker is the one of the prototype \code{\verb~|CharSet~} above, which is in no pull request. The same runs showed that the path form of the updates, which the walker builds on, is slower than recursion for a map with one owner, see [ins-I5QL](ins-I5QL).}
+}
+
 \subtree[design-wavl-walker-findings]{
 \title{Findings}
 
