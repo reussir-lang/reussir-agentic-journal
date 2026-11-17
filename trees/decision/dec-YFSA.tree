@@ -1,0 +1,26 @@
+\title{The rene library and static libraries are not stored in sccache}
+\taxon{Decision}
+\date{2026-11-17}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{tooling}
+\tag{ci}
+\meta{status}{accepted}
+\meta{created}{2026-11-17}
+\import{base-macros}
+
+\p{\strong{Status:} accepted. Implemented by \pr{1050}.}
+\p{\strong{Context.} Three days after the move to the bucket of [dec-0HDJ](dec-0HDJ) it held 70.7 GB: 51.9 GB of \code{sccache} objects, 9.5 GB of Nix store and 9.3 GB of directory snapshots. The last two were written once. The \code{sccache} part grew by 13 to 22 GB a day. The file tables of all its objects above 5 MB give this split:}
+\table{
+\tr{\th{Output}\th{Objects}\th{Size}}
+\tr{\td{\code{rene} library}\td{279}\td{24.9 GB}}
+\tr{\td{\code{reussir_core}}\td{337}\td{5.3 GB}}
+\tr{\td{C++ module outputs}\td{94}\td{4.7 GB}}
+\tr{\td{\code{reussir_backend_sys}}\td{105}\td{3.8 GB}}
+\tr{\td{\code{mlir_sys}, \code{tblgen}, \code{llvm_sys}}\td{36}\td{3.8 GB}}
+\tr{\td{static libraries}\td{27}\td{0.7 GB}}
+}
+\p{The \code{rene} library embeds the runtime bundle and the library sources, both already compressed, and the payload is in its metadata file as well as in its archive. One cached build is 86 to 96 MB and does not shrink. Its key changes with any edit to the library, the runtime, the other bundled crates or the lock file, and every platform and profile then stores a copy.}
+\p{\strong{Decision.} The jobs name \code{\verb~|scripts/ci/sccache-rustc.sh~} as the wrapper of \code{rustc}. It runs a compilation directly when the crate is \code{rene} or when the crate types include a static library, and passes every other compilation to \code{sccache}. Executables and dynamic libraries were never stored, since \code{sccache} does not cache a compilation that links.}
+\p{\strong{Consequences.} Each job compiles the \code{rene} library itself. Its dependencies still come from the bucket. The other rows of the table stay cached, see [dec-OT7X](dec-OT7X).}
+\p{\strong{What would change this.} The bundles leaving the \code{rene} library, for example into its executable, which would make the library small and stable enough to cache again.}
