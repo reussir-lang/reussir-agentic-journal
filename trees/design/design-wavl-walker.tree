@@ -87,7 +87,7 @@
 
 \p{The window rows are medians of 7 runs and include about 20 ms for building the map. The existing form of a window removal is \code{\verb~|range_to_list~} followed by one \code{\verb~|remove~} per key.}
 
-\p{The change to the repairs does not show in the existing operations. Medians of 7 runs, library without the prototype against library with it: 1,000,000 inserts and 750,000 removals on a map with one owner take 542.3 and 546.1; 2,000,000 inserts and removals that each copy their path from a kept map take 593.3 and 601.2. The ranges of the runs overlap in both rows.}
+\p{The change to the repairs has no gain of its own and costs the existing operations a little. Library without the prototype against library with it, medians of 7 runs: 1,000,000 inserts and 750,000 removals on a map with one owner take 542.3 and 546.1; 2,000,000 inserts and removals that each copy their path from a kept map take 593.3 and 601.2. The ranges of the runs overlap, but the counts of \code{\verb~|perf stat~} do not: instructions rise by 0.6 and 0.5 percent, cycles by 0.8 and 2.0 percent, which is 6 to 14 instructions per operation. The repair returns two words to its caller, which then rebuilds, where before the repair rebuilt.}
 }
 
 \subtree[design-wavl-walker-findings]{
@@ -113,6 +113,7 @@
 \title{Open questions}
 
 \ul{
+\li{Whether the cost of the third step on \code{\verb~|insert~} and \code{\verb~|remove~} is accepted for the changes through a walker. The alternatives are repairs of its own for the walker, which doubles that code, or a walker that only reads.}
 \li{The interface: what a position is called, whether \code{\verb~|seek~} may move in both directions as in the prototype, and how the end of the map is told from a gap.}
 \li{Whether a run of keys is removed by a walker operation or by split and join on the map. Split falls out of a path: the items entered on the right hold what is below the position and the others what is above.}
 \li{Union and intersection as a merge of two entry lists followed by a linear build from sorted input were not measured. They do not need a walker and take time in the sum of both sizes, where a sweep takes time in the smaller size and the logarithm of the ratio.}
