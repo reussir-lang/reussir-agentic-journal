@@ -1,0 +1,12 @@
+\title{Between two compatible tokens the reuse pass takes the most recent one}
+\taxon{Insight}
+\date{2026-11-17}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{stdlib}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the session](ses-A1OD), from the token-reuse report of a compiler built on 2026-11-16. Verified on \code{\verb~|Iter::next~} of \code{\verb~|WavlMap~}; no pull request came of it.}
+\p{\code{\verb~|Iter::next~} matches a path item, which releases it, and then builds a path item for the right subtree out of that subtree's node. Both the released path item and the node offer a token of the right size. The pass scores them equal and takes the most recent producer, the node. When the map is also held elsewhere the node is shared, so the new item is allocated and the released path item is freed: the reuse that the source seems to promise does not happen.}
+\p{A shape that makes the pass take the path item was measured and is slower, by 4 to 7 percent on kept maps, because the node then needs more reference-count work. A change that inlined one more level into \code{\verb~|next~} ran 4 to 7 percent fewer instructions and looked like the reuse working; the report was the same before and after. Read the report before attributing a gain to reuse. Getting this reuse needs a change of the tie-break, for example a preference for a token of the acceptor's own type.}

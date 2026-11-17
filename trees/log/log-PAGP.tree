@@ -1,0 +1,24 @@
+\title{Building a regex automaton and taking its matches do less work}
+\taxon{Change}
+\date{2026-11-17}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1062}
+\import{base-macros}
+
+\p{Five stacks of small changes, each measured against the main branch on its own, remove work from \code{\verb~|std::regex~} without changing what it answers. Figures are user-mode instructions after over before, with a compiler built on 2026-11-16.}
+\table{
+\tr{\th{Part}\th{Pull requests}\th{Result}}
+\tr{\td{The search for the states}\td{\pr{1062}, \pr{1065}, \pr{1071}, \pr{1076}, \pr{1079}, \pr{1081}, \pr{1083}}\td{a build of a lexer of 36 rules 0.41, of 300 keywords 0.054, of one rule with 8,193 states 0.20}}
+\tr{\td{The steps after the search}\td{\pr{1061}, \pr{1063}, \pr{1067}, \pr{1069}, \pr{1072}, \pr{1074}, \pr{1078}, \pr{1084}, \pr{1087}, \pr{1088}}\td{a build dominated by these steps 0.75 to 0.82}}
+\tr{\td{Sets of characters and their translation to bytes}\td{\pr{1059}, \pr{1064}, \pr{1068}, \pr{1073}, \pr{1077}, \pr{1082}, \pr{1085}, \pr{1086}}\td{complement 0.41, union and difference about 0.84, lowering a set about 0.65; a whole build moves by 0.2 percent}}
+\tr{\td{Taking matches}\td{\pr{1060}, \pr{1066}, \pr{1070}}\td{the stream 0.92, \code{\verb~|fold~} with its step written at the call 0.47, \code{\verb~|longest~} 0.75}}
+\tr{\td{Equality of \code{\verb~|WavlMap~} and of \code{\verb~|CharSet~}}\td{\pr{1075}, \pr{1080}}\td{equal maps that stay in use 0.32 to 0.76}}
+}
+\p{A state of the search now holds only the rules that can still match (\pr{1083}), which [the design note](design-regex-derivatives-actions) records. The lessons are [ins-XDN9](ins-XDN9), [ins-8ZBA](ins-8ZBA) and [ins-5WKT](ins-5WKT); the account of the work is [the session](ses-A1OD).}
+
+\p{In review as the pull requests above.}

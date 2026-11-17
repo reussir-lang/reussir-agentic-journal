@@ -1,0 +1,12 @@
+\title{A field read written inside a call is passed owned; a local used again after the call is borrowed}
+\taxon{Insight}
+\date{2026-11-17}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{stdlib}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: \pr{1059} and \pr{1060}, found in [the session](ses-A1OD). Verified with the borrow-analysis remarks of a compiler built on 2026-11-16.}
+\p{\code{\verb~|cuts(self.classes, set)~} reads the field into a temporary whose only use is the call. The borrow analysis sees a last use and passes the list owned: the caller retains it and the callee releases it, although the parameter is borrowable. Written as \code{\verb~|let classes = self.classes;~} with \code{\verb~|classes~} used again after the call, the value is live through the call and the borrowing copy of the callee is called. In \pr{1059} the two forms ran 1,075.2 and 765.7 million instructions on the same work.}
+\p{The same holds for a record kept by the caller: in \pr{1060} a stream hands its record to a private function and uses it again for the stream it returns, so the function and the scan under it run their borrowing copies and no reference count moves for a match. A private function that takes what the caller keeps is the way to get a hot path read without counting.}

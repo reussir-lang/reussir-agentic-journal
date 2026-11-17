@@ -1,0 +1,13 @@
+\title{A field updated while its record is still read is copied; take the fields out first}
+\taxon{Insight}
+\date{2026-11-17}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{stdlib}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: \pr{1071} and \pr{1078}, found in [the session](ses-A1OD). Verified with a compiler built on 2026-11-16.}
+\p{In \code{\verb~|Table { states: self.states.push(state), numbers: self.numbers.insert(state, number), next: self.next }~} the record \code{\verb~|self~} is alive until its last field is read, so during the push \code{\verb~|states~} is held twice and the whole buffer is copied; an insert into a map copies its path. The cost grows with the table, so a loop of such updates is quadratic. With \code{\verb~|rrc --instrument-nonlinear-ffi~} the build of an automaton of 2,049 states made 4,115 pushes onto a shared vector, and 4 after the change; the build of one with 8,193 states ran 0.24 of the instructions.}
+\p{The remedy is to bind every field to a local first and build the new record from the locals. It is the shape of \pr{1058}, a read after the update has begun, inside one record literal. With a compiler built on 2026-11-12 the fields of a literal were evaluated in the order the record declares them, whatever order the literal writes them in, so a field declared last was updated in place by accident; do not rely on that.}
+\p{It has a price that the token-reuse report shows: the old record is released before the calls that update the fields, its token does not survive them, and the new record is allocated instead of reusing the old cell. That is one small allocation in place of the copies.}

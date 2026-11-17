@@ -1,0 +1,15 @@
+\title{The regex tree has a variant for once or more}
+\taxon{Change}
+\date{2026-11-17}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1086}
+\import{base-macros}
+
+\p{The public enum \code{\verb~|Regex~} gains the variant \code{\verb~|Plus~}, and \code{\verb~|Regex::plus~} builds it, where it built the operand followed by its star and so held the operand twice. The operand is translated to bytes once. Code that matches on \code{\verb~|Regex~} without a catch-all arm needs an arm for it; in the library only the translation does. See [the session](ses-A1OD).}
+
+\p{In review as \pr{1086}.}

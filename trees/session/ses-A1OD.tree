@@ -1,0 +1,29 @@
+\title{A harvest of overhead in std::regex, and five stacks of small pull requests}
+\taxon{Session}
+\date{2026-11-17}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{stdlib}
+\tag{regex}
+\tag{performance}
+\meta{harness}{Claude Code}
+\meta{model-id}{claude-fable-5-2}
+\import{base-macros}
+
+\p{After \pr{1051}, \pr{1052}, \pr{1057} and \pr{1058} were merged, the maintainer asked for other places in \code{\verb~|std::regex~} with the same kinds of overhead, in the building of an automaton and in matching, and then for a pull request for each, stacked, of at most 200 changed lines. Five agents read one area each and measured where they could; the same five wrote the stacks, one worktree each, against the main branch after \pr{1058}.}
+
+\ul{
+\li{\strong{The search for the states.} \pr{1062}, \pr{1065}, \pr{1071}, \pr{1076}, \pr{1079}, \pr{1081}, \pr{1083}. The two fixed nodes are recognised by number; a fallback entry is built only on a miss; the tables give up their fields before one is updated ([ins-XDN9](ins-XDN9)); the nullability and the derivatives of a union are gathered with its children; and a state holds only the rules that can still match, which [the design note](design-regex-derivatives-actions) now says.}
+\li{\strong{The steps after the search.} \pr{1061}, \pr{1063}, \pr{1067}, \pr{1069}, \pr{1072}, \pr{1074}, \pr{1078}, \pr{1084}, \pr{1087}, \pr{1088}. Tables of known size are native arrays; a source is entered once for adjacent classes; a column is hashed in the table; the four bytes of a run stay one word until packing; the rectangles of a set are found only where shuffle tables may take it; and \code{\verb~|Vec::get_or~} ([log-Y1I0](log-Y1I0)).}
+\li{\strong{Sets of characters and the tree.} \pr{1059}, \pr{1064}, \pr{1068}, \pr{1073}, \pr{1077}, \pr{1082}, \pr{1085}, \pr{1086}, with [log-QD93](log-QD93) and [log-ED17](log-ED17). These gain on sets and on lowering; a whole build moves by 0.2 percent, because the search dominates it.}
+\li{\strong{Matching.} \pr{1060}, \pr{1066}, \pr{1070}, with [log-123K](log-123K) and [ins-5WKT](ins-5WKT). \code{\verb~|fold~} calls itself with its step, which lets the compiler specialize it for a closure written at the call; an unoptimized build then makes one call per match, which the maintainer had accepted for recursion in general.}
+\li{\strong{WavlMap.} \pr{1075} compares two maps by walking one tree in order against an iterator of the other, and \pr{1080} puts the equality of \code{\verb~|CharSet~} back on it. A change to \code{\verb~|Iter::next~} was dropped: [ins-8ZBA](ins-8ZBA).}
+}
+
+\p{The figures are in [the changelog entry](log-PAGP) and in each pull request. Every pull request states what the token-reuse report and the borrow-analysis remarks of \code{\verb~|rrc~} show for the functions it changes, as the maintainer asked; twice the remarks overturned a claim made from reading (the reuse in \code{\verb~|Iter::next~}, and the borrowed list in \pr{1059}).}
+
+\p{\strong{Measured and left out.} A table step before the skip of a run gains on short tokens and loses up to 6 percent on long ones. Reading the tables of the matcher once before its loop is slower. The equality of \code{\verb~|CharSet~} through two iterators, as \pr{1057} merged it, wins for equal sets of 20 stretches and more and whenever the sets are not kept; a lookup per stretch wins at 4 stretches; two lists win only for equal sets that stay in use. The form of \pr{1075} beats all three for equal kept sets.}
+
+\p{\strong{Not done.} The node table of the search still answers every read through a boxed option of the copy-on-write \code{\verb~|Vec~}; that read and the allocator are most of what is left of a build. In the matcher, a read of a table of unknown length reloads the header of the array and multiplies by its stride on the path from one cell to the next, and an owned record is released before the read of a field taken at its last use; both are for the compiler. Local runs used a compiler built on 2026-11-16, older than the library it compiled, and CI had not finished when the stacks were opened.}
+
+\p{The first measurements of the search and of the collections were made with a compiler built on 2026-11-12, which leaks a destructuring \code{\verb~|let~} in the body of a \code{\verb~|while~} (fixed by \pr{1045}) and so copied every table in such a loop; numbers from it mean nothing until those loops are written with \code{\verb~|match~}.}
