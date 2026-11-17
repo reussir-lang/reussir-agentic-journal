@@ -1,0 +1,106 @@
+\title{A walker and an iterator for \code{\verb~|WavlMap~}}
+\taxon{Design}
+\date{2026-11-17}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{design}
+\tag{stdlib}
+\meta{status}{draft}
+\meta{created}{2026-11-17}
+\import{base-macros}
+
+\p{\strong{Status:} draft. This is a study with a prototype. Nothing is merged and the design is not accepted. Source: [the session](ses-Z19Y).}
+
+\p{The question is whether \code{\verb~|WavlMap~} and \code{\verb~|WavlSet~} should offer two things. A \em{walker} is a map opened at a position: it moves to another key, reads or changes the entry there, and closes into a map again. An \em{iterator} yields the entries one at a time, least key first. The case that raised the question is \code{\verb~|CharSet~} after \pr{1049}: each of its operations makes several separate descents from the root, namely two \code{\verb~|floor_entry~} calls, a \code{\verb~|range_to_list~}, one \code{\verb~|remove~} per stretch and an \code{\verb~|insert~}.}
+
+\p{Short answer: for the map a walker is cheap to add and about halves the time of set algebra on \code{\verb~|CharSet~}; an iterator pays off where two maps are read in step; neither helps a plain traversal; removing a long run of keys needs a different tool. For the set the cost is higher and nothing was measured.}
+
+\subtree[design-wavl-walker-prototype]{
+\title{The prototype}
+
+\p{\code{\verb~|WavlMap~} already records the path of an update in \code{\verb~|Path~}, whose items have the size of a node. The prototype builds on that and changes one file.}
+
+\ul{
+\li{\strong{A repair returns where it stopped.} \code{\verb~|fixup_ins~} and \code{\verb~|fixup_del~} ended by rebuilding the rest of the path up to the root. They now return the repaired subtree with the path that is left, and \code{\verb~|insert~}, \code{\verb~|remove~}, \code{\verb~|pop_min~} and \code{\verb~|pop_max~} rebuild from there. This is 39 lines added and 31 removed.}
+\li{\strong{The walker} holds the size, a path and the subtree at the end of it. It is on an entry when that subtree is a node and between two entries when it is empty. \code{\verb~|seek~} climbs while the key lies at or beyond the entry above or below the subtree, which it reads off the path, and then descends; a move costs the way through the tree between the two keys, not the height. \code{\verb~|put~} and \code{\verb~|remove~} change the entry, repair, and descend again from where the repair stopped. \code{\verb~|entry~}, \code{\verb~|before~} and \code{\verb~|after~} read the entry at the position and its neighbours, \code{\verb~|next~} steps to the next entry, and \code{\verb~|finish~} gives the map.}
+\li{\strong{The iterator} is a path of the items still to visit. \code{\verb~|next~} yields one entry and descends the left side of its right subtree.}
+\li{\code{\verb~|Path~} becomes public, because it is a field of two public types, as \code{\verb~|Tree~} already is.}
+}
+
+\p{Walker and iterator together are about 250 lines. A map changed through the walker is equal to the map changed through \code{\verb~|insert~} and \code{\verb~|remove~}, and every workload below gives the same checksum in both forms.}
+}
+
+\subtree[design-wavl-walker-ownership]{
+\title{What a move costs}
+
+\p{A move turns nodes into path items and back. When the walker is the only owner, each turns into the other in place and a move allocates nothing. When the map is also held elsewhere, every node the walker passes is copied once, as an update copies its path. A walker is therefore a tool for changing a map. Reading a kept map through it costs more than a fold, which copies nothing.}
+}
+
+\subtree[design-wavl-walker-measurements]{
+\title{Measurements}
+
+\p{Release profile, whole process, median of 11 runs in milliseconds, pinned to one core of an AMD EPYC 7773X. The compiler is a build of 2026-11-13; the library is the main branch at \pr{1049} with the prototype.}
+
+\p{\code{\verb~|CharSet~} as merged against the same set written on the walker. The inputs stay alive across the repetitions except in the second row. The workloads follow the rows measured for [how a set of characters is held](design-regex-derivatives-utf8), but they were written anew and ran on another machine, so the two tables do not compare row by row.}
+
+\table{
+\tr{\th{Workload}\th{merged}\th{walker}\th{walker / merged}}
+\tr{\td{\code{\verb~|[A-Za-z0-9_]~} from ranges, its complement, an intersection, a difference, 300,000 times}\td{455.2}\td{451.7}\td{0.99}}
+\tr{\td{one set as the union of 20,000 stretches in scattered order}\td{8.7}\td{6.7}\td{0.77}}
+\tr{\td{union of two sets of 1,000 stretches, 200 times}\td{47.3}\td{23.4}\td{0.49}}
+\tr{\td{intersection of the same, 200 times}\td{33.5}\td{25.8}\td{0.77}}
+\tr{\td{difference of the same, 200 times}\td{51.3}\td{23.2}\td{0.45}}
+\tr{\td{complement, 200 times}\td{50.0}\td{27.0}\td{0.54}}
+\tr{\td{a stretch that covers 1,000 stretches united with a set of 2,000, 2,000 times}\td{146.5}\td{196.8}\td{1.34}}
+\tr{\td{a set of 4 stretches against one of 2,000: intersection, both differences, union, 2,000 times}\td{386.5}\td{296.0}\td{0.77}}
+\tr{\td{two unions and a comparison of sets of 2,000 stretches, 1,000 times}\td{1026.8}\td{614.4}\td{0.60}}
+}
+
+\p{Maps of 100,000 entries with word-sized keys and values.}
+
+\table{
+\tr{\th{Workload}\th{existing}\th{iterator}\th{walker}}
+\tr{\td{read every entry of a kept map, 200 times}\td{176.1 \code{\verb~|fold_left~}, 293.8 \code{\verb~|to_list~}}\td{306.6}\td{665.9}}
+\tr{\td{read every entry of a map the reader owns, 20 times, less the 253.1 that building the maps takes}\td{3.8 \code{\verb~|fold_left~}, 20.5 \code{\verb~|to_list~}}\td{31.4}\td{78.8}}
+\tr{\td{compare two equal maps of different shape, 50 times}\td{432.5}\td{180.1}\td{}}
+\tr{\td{build a map from 1,000,000 ascending keys}\td{98.4}\td{}\td{60.2}}
+\tr{\td{remove a window of 1,000 keys from a kept map, 2,000 times}\td{199.9}\td{}\td{248.0}}
+\tr{\td{remove a window of 50 keys, 20,000 times}\td{141.7}\td{}\td{126.2}}
+\tr{\td{remove a window of 4 keys, 200,000 times}\td{228.5}\td{}\td{167.3}}
+}
+
+\p{The window rows are medians of 7 runs and include about 20 ms for building the map. The existing form of a window removal is \code{\verb~|range_to_list~} followed by one \code{\verb~|remove~} per key.}
+
+\p{The change to the repairs does not show in the existing operations. Medians of 7 runs, library without the prototype against library with it: 1,000,000 inserts and 750,000 removals on a map with one owner take 542.3 and 546.1; 2,000,000 inserts and removals that each copy their path from a kept map take 593.3 and 601.2. The ranges of the runs overlap in both rows.}
+}
+
+\subtree[design-wavl-walker-findings]{
+\title{Findings}
+
+\ul{
+\li{\strong{A sweep that changes the map as it goes is where the walker pays.} Union, difference and complement of sets of similar size take about half the time, and the cases with one small operand about three quarters.}
+\li{\strong{Reading two maps in step is where the iterator pays.} Equality is \code{\verb~|n~} lookups today; with two iterators it is one pass and 2.4 times faster. The subset tests, \code{\verb~|is_disjoint~} and the unions and intersections of two maps have the same shape and were not measured.}
+\li{\strong{Ascending input.} Putting keys through a walker that stays at the end builds the map 1.6 times faster than inserting them, since each put repairs a constant number of nodes on average.}
+\li{\strong{A plain traversal gains nothing.} \code{\verb~|fold_left~} is the fastest way to read a map. The iterator costs about what \code{\verb~|to_list~} costs, with the differences that it keeps only one path alive and can stop early.}
+\li{\strong{A long run of removals loses.} Removing 1,000 neighbouring keys one at a time through the walker is about a quarter slower than \code{\verb~|remove~} per key, and the union with a wide stretch shows the same. Each step of the prototype makes four calls that each copy the walker's two references and read a neighbour off the path. The work is also proportional to the run in both forms; cutting a run out in logarithmic time needs split and join.}
+\li{\strong{Tiny sets are unchanged.} A set of four stretches is a tree of two levels, and nothing is saved by staying in place.}
+}
+}
+
+\subtree[design-wavl-walker-set]{
+\title{\code{\verb~|WavlSet~}}
+
+\p{The set has no path. It updates by recursion and stores only whether a rank is even or odd, so a repair is told by its caller whether the child was raised or dropped. A walker needs a path type of four items, for an even or odd node entered on the left or the right, each of the size of a set node, and repairs that run over that path. The existing functions that repair one level can be called once per path item. This is more work than for the map, where the path existed, and whether updates over a path are as fast as the recursion for a 32-byte node is not known. Nothing was built or measured for the set.}
+}
+
+\subtree[design-wavl-walker-open]{
+\title{Open questions}
+
+\ul{
+\li{The interface: what a position is called, whether \code{\verb~|seek~} may move in both directions as in the prototype, and how the end of the map is told from a gap.}
+\li{Whether a run of keys is removed by a walker operation or by split and join on the map. Split falls out of a path: the items entered on the right hold what is below the position and the others what is above.}
+\li{Union and intersection as a merge of two entry lists followed by a linear build from sorted input were not measured. They do not need a walker and take time in the sum of both sizes, where a sweep takes time in the smaller size and the logarithm of the ratio.}
+\li{Whether equality and the subset tests move to the iterator.}
+\li{Whether \code{\verb~|WavlSet~} gets a path at all.}
+}
+}

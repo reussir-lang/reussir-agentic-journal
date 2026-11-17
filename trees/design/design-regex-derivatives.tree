@@ -210,6 +210,8 @@ classes.inside(set)         the numbers of the classes that make up `set`, as a 
 
 \p{The times include reading the result of each operation. In the earlier form a set of a range was made by intersecting with every character, and an intersection removed from the larger set what the smaller one lacked; the stretches form cuts the surrogates out of a range directly and gathers an intersection into a new map, so the rows measure the two forms as they were written, not the layout of the entries alone.}
 
+\p{Each operation on the stretches descends from the root of the map several times. Whether a walker over the map makes them cheaper was studied with a prototype, see [a walker and an iterator for WavlMap](design-wavl-walker).}
+
 \p{Surrogates, U+D800 to U+DFFF, and numbers above U+10FFFF are in no set.}
 
 \p{\code{\verb~|IntMap~}, the Patricia map of the same library, has every operation used here. Both were measured under the same code for sets in the earlier form of change points, in one program, release profile, whole process, median of 11 runs in milliseconds:}

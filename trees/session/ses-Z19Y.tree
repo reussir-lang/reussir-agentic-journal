@@ -1,0 +1,19 @@
+\title{A study of a walker and an iterator for the WAVL containers}
+\taxon{Session}
+\date{2026-11-17}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{stdlib}
+\meta{harness}{Claude Code}
+\meta{model-id}{claude-fable-5-2}
+\import{base-macros}
+
+\p{After \pr{1049} the maintainer asked whether a zipper-based iterator or walker for \code{\verb~|WavlMap~} and \code{\verb~|WavlSet~} is feasible and worth having. A prototype for the map was written on the main branch at \pr{1049}, outside the repository, and timed against the existing operations and against \code{\verb~|CharSet~} as merged.}
+
+\ul{
+\li{\strong{Design note.} [A walker and an iterator for WavlMap](design-wavl-walker), a draft with the prototype, the measurements and the open questions.}
+\li{\strong{Result.} Feasible for the map with a small change, and about twice as fast for set algebra on \code{\verb~|CharSet~}; an iterator helps comparisons; a plain traversal and a long run of removals do not gain. The set was only analysed.}
+\li{\strong{Not done.} No pull request. The prototype is not tuned, has no tests of its own beyond agreement with the existing operations on the timed workloads, and was compiled with a compiler built on 2026-11-13, older than the library it compiled.}
+}
+
+\p{One timing was wrong at first and was repeated: the checksum of the window removals called \code{\verb~|depth~}, which visits every node, so both forms measured the same. The note has the repeated numbers.}

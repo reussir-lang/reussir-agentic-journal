@@ -32,5 +32,6 @@
 \transclude{design-token-reuse-remarks}
 \transclude{design-trait-system}
 \transclude{design-tuples}
+\transclude{design-wavl-walker}
 \transclude{design-while-expressions}
 }
