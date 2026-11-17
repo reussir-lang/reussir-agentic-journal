@@ -1,0 +1,15 @@
+\title{Sets of characters are compared in one pass and can be read one stretch at a time}
+\taxon{Change}
+\date{2026-11-17}
+\author{claude-fable-5-2}
+\contributor{schrodingerzy}
+\tag{changelog}
+\tag{stdlib}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{pr}{1057}
+\import{base-macros}
+
+\p{The equality of two \code{\verb~|CharSet~}s reads both sets in step through the iterator of \code{\verb~|WavlMap~}; it is about three times faster for sets of 2,000 stretches. \code{\verb~|CharSet::iter~} is new and yields the stretches in order, one at a time. \code{\verb~|spans~} and the UTF-8 translation read the stretches the same way. See [the measurements](design-wavl-walker-regex).}
+
+\p{In review as \pr{1057}.}

@@ -43,7 +43,7 @@
 \li{\pr{1054}: \code{\verb~|put~} and \code{\verb~|remove~} on the walker, which need the third. Closed.}
 }
 
-\p{The last two were closed by [dec-DR32](dec-DR32). \pr{1056} runs CI over the first two and is not for merging. Against the prototype the two add \code{\verb~|prev~} and \code{\verb~|last~}, the mirrors of \code{\verb~|next~} and \code{\verb~|first~}, and tests: unit cases for the walker and the iterator, and a fuzz target that moves a walker and compares what it reads at every step with the map operations.}
+\p{The last two were closed by [dec-DR32](dec-DR32). Against the prototype the two add \code{\verb~|prev~} and \code{\verb~|last~}, the mirrors of \code{\verb~|next~} and \code{\verb~|first~}, and tests: unit cases for the walker and the iterator, and a fuzz target that moves a walker and compares what it reads at every step with the map operations.}
 }
 
 \subtree[design-wavl-walker-ownership]{
@@ -103,6 +103,27 @@
 }
 
 \p{The stack neither gains nor loses here: these programs do not use a walker, and the cost of the third step is below one part in a thousand of their instructions. The gain measured for the walker is the one of the prototype \code{\verb~|CharSet~} above, which is in no pull request. The same runs showed that the path form of the updates, which the walker builds on, is slower than recursion for a map with one owner, see [ins-I5QL](ins-I5QL).}
+}
+
+\subtree[design-wavl-walker-regex]{
+\title{The iterator in the regex module}
+
+\p{\pr{1057} moves \code{\verb~|CharSet~} and the UTF-8 translation onto the iterator where that measured as a gain or as no change. One program that uses only public functions was built against the library before and after; medians of 7 runs in milliseconds, and cycles in millions, on an EPYC 7773X.}
+
+\table{
+\tr{\th{Workload}\th{before}\th{after}\th{cycles before}\th{cycles after}}
+\tr{\td{compare two equal sets of 2,000 stretches with trees of different shapes, 5,000 times}\td{718.6}\td{237.0}\td{2,268.7}\td{748.2}}
+\tr{\td{the UTF-8 sequences of a set of 2,000 stretches, 5,000 times}\td{1748.4}\td{1713.6}\td{5,710.7}\td{5,530.6}}
+\tr{\td{the stretches of a set of 2,000, 20,000 times}\td{769.5}\td{735.7}\td{2,415.2}\td{2,392.2}}
+\tr{\td{\code{\verb~|[A-Za-z0-9_]~} from ranges, its complement, an intersection, a difference, each read, 300,000 times}\td{510.2}\td{486.9}\td{1,677.1}\td{1,534.5}}
+}
+
+\p{The gain is the comparison. Two things were tried and left out.}
+
+\ul{
+\li{Union, intersection and difference reading the other set through the iterator instead of a list: 3 to 5 percent slower when the other set is kept alive. An iterator over a kept map allocates a path item per entry, which is larger than a list cell.}
+\li{Intersection reading the larger set through the walker: 18 percent faster for two sets of 1,000 stretches, 4 percent slower for \code{\verb~|[A-Za-z0-9_]~}. Sets in a regex are mostly small.}
+}
 }
 
 \subtree[design-wavl-walker-findings]{
