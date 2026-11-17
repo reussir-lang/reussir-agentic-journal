@@ -174,23 +174,45 @@ classes.inside(set)         the numbers of the classes that make up `set`, as a 
 
 \p{The builder takes a set of characters as a \code{\verb~|CharSet~}. The tree keeps it as a set until the rules are turned into a matcher. Until then set algebra is done on code points, where it is exact and cheap: the sets inside one union or intersection are merged (decision 1), and the complement of a set is taken there (decision 4).}
 
-\p{\strong{How a set of characters is held.} A set gives every code point one of two values, in or out, and the value changes at only a few code points. It is held as those code points, in the ordered map \code{\verb~|WavlMap<u32, bool>~} of \code{\verb~|std::collections::pure~}: the entry \code{\verb~|(k, v)~} says the value is \code{\verb~|v~} from \code{\verb~|k~} up to the next key. The value from zero is a field beside the map, so a lookup always has an answer and needs no panic. ICU's \code{\verb~|UnicodeSet~} holds a set the same way, in a sorted array.}
+\p{\strong{How a set of characters is held.} A set is held as the stretches of code points that are its members, in the ordered map \code{\verb~|WavlMap<u32, u32>~} of \code{\verb~|std::collections::pure~}: the entry \code{\verb~|(start, end)~} is the stretch from \code{\verb~|start~} up to \code{\verb~|end~}, \code{\verb~|end~} not included. Every stretch has a member, and no two overlap or touch; equality compares the maps and depends on this. Paguroidea holds its intervals the same way, in a sorted vector.}
 
 \pre{\verb~|
-[a-zα-ω]      from 0: out,   61 → in,   7B → out,   3B1 → in,   3CA → out
+[a-zα-ω]      61 → 7B,   3B1 → 3CA
 ~}
 
 \table{
 \tr{\th{Operation}\th{How}\th{Cost}}
-\tr{\td{is a character in a set}\td{the entry at or below its code point}\td{a logarithm of the number of changes}}
-\tr{\td{give a range one value}\td{remove the keys inside it, insert its two ends, drop an end where the value does not change}\td{a logarithm, and the keys removed}}
-\tr{\td{union, intersection, difference}\td{walk the set with fewer changes and give its ranges a value in the other}\td{the smaller set times a logarithm}}
-\tr{\td{the stretches of members in order}\td{one walk of the map}\td{linear}}
+\tr{\td{is a character in a set}\td{the entry at or below its code point, compared with its end}\td{a logarithm of the number of stretches}}
+\tr{\td{add a stretch}\td{join the stretch that reaches its start and every stretch that begins up to its end; remove those, insert one}\td{a logarithm, and the stretches joined}}
+\tr{\td{remove a stretch}\td{remove the stretches that begin inside it; the one that reaches in from before keeps its part before, the last one keeps its part after}\td{a logarithm, and the stretches removed}}
+\tr{\td{union}\td{add the stretches of the set with fewer to the other}\td{the smaller set times a logarithm}}
+\tr{\td{intersection}\td{for every stretch of the set with fewer, gather the parts of the other inside it into a new map}\td{the smaller set times a logarithm, and the parts}}
+\tr{\td{difference}\td{remove the stretches of the second set from the first}\td{the second set times a logarithm}}
+\tr{\td{the stretches of members in order}\td{the entries as they are}\td{linear}}
 }
+
+\p{An earlier form held the code points at which membership changes, each with a boolean, in \code{\verb~|WavlMap<u32, bool>~}, and the value from zero in a field beside the map; ICU's \code{\verb~|UnicodeSet~} holds change points in a sorted array, where the place in the array says in or out. In a map the boolean had to be stored, and it said nothing the order did not, since the values always alternated; a set had two entries for every stretch. Both forms were measured in one program, release profile, whole process, median of 11 runs in milliseconds, on a Ryzen 9 9950X:}
+
+\table{
+\tr{\th{Workload}\th{Change points}\th{Stretches}\th{Stretches / change points}}
+\tr{\td{\code{\verb~|[A-Za-z0-9_]~} from ranges, its complement, an intersection, a difference, 300,000 times}\td{1101.1}\td{174.2}\td{0.16}}
+\tr{\td{one set as the union of 20,000 stretches}\td{16.0}\td{2.5}\td{0.16}}
+\tr{\td{union of two sets of 1,000 stretches, 200 times}\td{99.3}\td{20.6}\td{0.21}}
+\tr{\td{intersection of the same, 200 times}\td{94.3}\td{5.8}\td{0.06}}
+\tr{\td{difference of the same, 200 times}\td{98.0}\td{12.7}\td{0.13}}
+\tr{\td{complement, 200 times}\td{42.0}\td{21.3}\td{0.51}}
+\tr{\td{a wide stretch united with a set of 2,000 stretches, 2,000 times}\td{123.4}\td{53.2}\td{0.43}}
+\tr{\td{a set of 4 stretches against one of 2,000: intersection, both differences, union, 2,000 times}\td{1032.1}\td{257.2}\td{0.25}}
+\tr{\td{5,000,000 lookups in a set of 2,000 stretches}\td{265.4}\td{234.7}\td{0.88}}
+\tr{\td{the stretches of a set of 2,000, 20,000 times}\td{605.5}\td{225.4}\td{0.37}}
+\tr{\td{two unions and a comparison of sets of 2,000 stretches, 1,000 times}\td{118.8}\td{31.8}\td{0.27}}
+}
+
+\p{The times include reading the result of each operation. In the earlier form a set of a range was made by intersecting with every character, and an intersection removed from the larger set what the smaller one lacked; the stretches form cuts the surrogates out of a range directly and gathers an intersection into a new map, so the rows measure the two forms as they were written, not the layout of the entries alone.}
 
 \p{Surrogates, U+D800 to U+DFFF, and numbers above U+10FFFF are in no set.}
 
-\p{\code{\verb~|IntMap~}, the Patricia map of the same library, has every operation used here. Both were measured under the same code for sets, in one program, release profile, whole process, median of 11 runs in milliseconds:}
+\p{\code{\verb~|IntMap~}, the Patricia map of the same library, has every operation used here. Both were measured under the same code for sets in the earlier form of change points, in one program, release profile, whole process, median of 11 runs in milliseconds:}
 
 \table{
 \tr{\th{Workload}\th{WAVL}\th{IntMap}\th{IntMap / WAVL}}
