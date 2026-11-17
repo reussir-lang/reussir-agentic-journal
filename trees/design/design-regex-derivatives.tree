@@ -453,6 +453,27 @@ low[byte & 15] & high[byte >> 4] & bits != 0      the byte is in the set
 \title{8. Where it lives}
 
 \p{A module \code{\verb~|std::regex~}, with nothing added to the compiler.}
+
+\p{The automaton is built in a chain of steps, each a module of \code{\verb~|std::regex::automaton~}. After the first step nothing knows about regex nodes; every later step works on numbers, so each can be read and checked alone:}
+
+\table{
+\tr{\th{Step}\th{Module}\th{Takes}\th{Gives}}
+\tr{\td{1}\td{\code{\verb~|explore~}}\td{rules, classes of bytes, a limit}\td{the states as found: the next state by class, and the winning rule of each}}
+\tr{\td{2}\td{\code{\verb~|classify~}}\td{those states}\td{the kind of each: dead, accepting, with a run}}
+\tr{\td{3}\td{\code{\verb~|arrange~}}\td{states and kinds}\td{the states numbered kind after kind}}
+\tr{\td{4}\td{\code{\verb~|columns~}}\td{the arranged table}\td{the classes that share a column}}
+\tr{\td{5}\td{\code{\verb~|lookahead~}}\td{the bytes each state stays on}\td{run words, vectors, lookup tables, shuffle tables}}
+\tr{\td{6}\td{\code{\verb~|pack~}}\td{all of these}\td{the flat arrays}}
+}
+
+\ul{
+\li{\code{\verb~|explore~} keeps a table of states whose one growing operation is \code{\verb~|allocate(nodes)~}: it answers the number of the state and enters a new state under its nodes.}
+\li{\code{\verb~|lookahead~} keeps a \code{\verb~|LoopOptimizer~}, named after Paguroidea's: runs are added one after another, and \code{\verb~|assign_table~} gives a set its bit in the lookup tables that all runs share. The two other ways to skip a run are the modules \code{\verb~|vectors~} and \code{\verb~|shuffle~}.}
+\li{\code{\verb~|encoding~} is the one place that packs and unpacks a cell of the table and the word of a run.}
+\li{\code{\verb~|scan~} is matching, \code{\verb~|stream~} the matches pulled one after another, \code{\verb~|inspect~} the functions that look at an automaton one step at a time, and \code{\verb~|native~} the loops that read the input through a pointer.}
+}
+
+\p{The split was checked against the single module it replaced: both builds of random rule lists gave equal arrays, and the matching loop compiled to the same instructions.}
 }
 }
 
