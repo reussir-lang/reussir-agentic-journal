@@ -108,22 +108,43 @@
 \subtree[design-wavl-walker-regex]{
 \title{The iterator in the regex module}
 
-\p{\pr{1057} moves \code{\verb~|CharSet~} and the UTF-8 translation onto the iterator where that measured as a gain or as no change. One program that uses only public functions was built against the library before and after; medians of 7 runs in milliseconds, and cycles in millions, on an EPYC 7773X.}
+\p{\pr{1057} removes the lists of entries that \code{\verb~|CharSet~} and the UTF-8 translation built to read a set. The rule that the measurements gave: a fold where one set is read once, the iterator where two sets are read in step or the reader is in another module, and a list only for the few stretches inside a range.}
 
 \table{
-\tr{\th{Workload}\th{before}\th{after}\th{cycles before}\th{cycles after}}
-\tr{\td{compare two equal sets of 2,000 stretches with trees of different shapes, 5,000 times}\td{718.6}\td{237.0}\td{2,268.7}\td{748.2}}
-\tr{\td{the UTF-8 sequences of a set of 2,000 stretches, 5,000 times}\td{1748.4}\td{1713.6}\td{5,710.7}\td{5,530.6}}
-\tr{\td{the stretches of a set of 2,000, 20,000 times}\td{769.5}\td{735.7}\td{2,415.2}\td{2,392.2}}
-\tr{\td{\code{\verb~|[A-Za-z0-9_]~} from ranges, its complement, an intersection, a difference, each read, 300,000 times}\td{510.2}\td{486.9}\td{1,677.1}\td{1,534.5}}
+\tr{\th{}\th{before}\th{now}}
+\tr{\td{equality}\td{a lookup in the other set per stretch}\td{both sets in step, through two iterators}}
+\tr{\td{union, difference}\td{\code{\verb~|to_list~} of the other set}\td{\code{\verb~|fold_left~} over the other set}}
+\tr{\td{intersection}\td{\code{\verb~|to_list~} of the other set}\td{the iterator of the other set}}
+\tr{\td{\code{\verb~|spans~}}\td{\code{\verb~|to_list~}, then a second list}\td{one \code{\verb~|fold_right~}}}
+\tr{\td{\code{\verb~|fold_sequences~}}\td{\code{\verb~|spans~}, then a fold}\td{the iterator}}
 }
 
-\p{The gain is the comparison. Two things were tried and left out.}
+\p{One program that uses only public functions, built against the library before and after and run interleaved; medians of 7 runs in milliseconds on an EPYC 7773X.}
+
+\table{
+\tr{\th{Workload}\th{before}\th{after}\th{after / before}}
+\tr{\td{compare two equal sets of 2,000 stretches with trees of different shapes, 5,000 times}\td{660.1}\td{228.7}\td{0.35}}
+\tr{\td{the stretches of a set of 2,000, 20,000 times}\td{661.8}\td{447.7}\td{0.68}}
+\tr{\td{the UTF-8 sequences of a set of 2,000 stretches, 5,000 times}\td{1585.6}\td{1544.5}\td{0.97}}
+\tr{\td{\code{\verb~|[A-Za-z0-9_]~} from ranges, its complement, an intersection, a difference, each read, 300,000 times}\td{460.7}\td{415.1}\td{0.90}}
+\tr{\td{union of two sets of 1,000 stretches, 200 times}\td{48.9}\td{47.1}\td{0.96}}
+\tr{\td{intersection of the same, 200 times}\td{34.0}\td{32.5}\td{0.96}}
+\tr{\td{difference of the same, 200 times}\td{52.6}\td{51.2}\td{0.97}}
+\tr{\td{a wide stretch united with a set of 2,000 stretches, 2,000 times}\td{146.6}\td{134.7}\td{0.92}}
+\tr{\td{a set of 4 stretches against one of 2,000: intersection, both differences, union, 2,000 times}\td{380.5}\td{340.1}\td{0.89}}
+}
+
+\p{Forms that were measured and left out:}
 
 \ul{
-\li{Union, intersection and difference reading the other set through the iterator instead of a list: 3 to 5 percent slower when the other set is kept alive. An iterator over a kept map allocates a path item per entry, which is larger than a list cell.}
-\li{Intersection reading the larger set through the walker: 18 percent faster for two sets of 1,000 stretches, 4 percent slower for \code{\verb~|[A-Za-z0-9_]~}. Sets in a regex are mostly small.}
+\li{Union and difference reading the other set through the iterator: 3 to 5 percent slower than the list when the other set is kept alive. An iterator over a kept map allocates a path item per entry, which is larger than a list cell; the fold allocates nothing.}
+\li{\code{\verb~|spans~} through the iterator: 8 percent more instructions on a set of 2,000 stretches that shares its nodes.}
+\li{The intersection as a fold with a closure that holds the larger set: 7 percent slower than the list, with 15 percent more instructions.}
+\li{The stretches inside a range without \code{\verb~|range_to_list~}, by stepping with \code{\verb~|ceiling_entry~}: 9 to 15 percent slower in union, 11 percent in the intersection. Each stretch costs one more descent, which is more than a list cell.}
+\li{The intersection reading the larger set through the walker: 18 percent faster for two sets of 1,000 stretches, 4 percent slower for \code{\verb~|[A-Za-z0-9_]~}. Sets in a regex are mostly small.}
 }
+
+\p{Not in the pull request, and measured on top of it: \code{\verb~|cut~} reads the two neighbouring stretches after it has removed the stretches inside the range, so the map it removes from is still held and every removal copies its path. Reading them first takes the complement from 48.6 to 33.2 and the small set against the large one from 340.2 to 283.2.}
 }
 
 \subtree[design-wavl-walker-findings]{
