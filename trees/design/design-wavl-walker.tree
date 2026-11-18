@@ -37,8 +37,8 @@
 \p{The prototype was first opened as one pull request and then split into four, so that the change to the existing repairs could be judged apart from the new functions.}
 
 \ol{
-\li{\pr{1051}: the walker that moves and reads. No existing function is changed; \code{\verb~|Path~} becomes public. In review.}
-\li{\pr{1052}: the iterator. In review.}
+\li{\pr{1051}: the walker that moves and reads. No existing function is changed; \code{\verb~|Path~} becomes public. Merged.}
+\li{\pr{1052}: the iterator. Merged.}
 \li{\pr{1053}: the repairs return where they stopped, the only change to existing code. Closed.}
 \li{\pr{1054}: \code{\verb~|put~} and \code{\verb~|remove~} on the walker, which need the third. Closed.}
 }
