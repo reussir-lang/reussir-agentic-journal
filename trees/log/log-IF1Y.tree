@@ -12,4 +12,4 @@
 
 \p{\code{\verb~|Matches::fold(initial, step)~} is new: it folds over the matches left in a stream, one after another, and gives the value with the place where it ended, which is the end of the text, a byte no rule matches, or a match of no bytes. \code{\verb~|Automaton::fold~} is now the fold of the stream of its matches and gives what it gave before. The fold passes its step along to itself, so a closure written at the call is compiled into the loop: such a fold runs about half the instructions it ran as a loop over \code{\verb~|scan~}. See [the session](ses-A1OD).}
 
-\p{In review as \pr{1066}.}
+\p{Merged as \pr{1066}.}

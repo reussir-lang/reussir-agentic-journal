@@ -11,7 +11,7 @@
 \meta{updated}{2026-11-17}
 \import{base-macros}
 
-\p{\strong{Status:} draft, for discussion. The sets of bytes and of characters and the classes of bytes (\pr{1039}), the UTF-8 sequences of a set of characters (\pr{1041}), the regex tree with its translation to bytes (\pr{1042}) and the nodes with their derivatives (\pr{1043}) are in the standard library; the automaton with its table and runs is in review as \pr{1044}; nothing else is implemented.}
+\p{\strong{Status:} draft, for discussion. The sets of bytes and of characters and the classes of bytes (\pr{1039}), the UTF-8 sequences of a set of characters (\pr{1041}), the regex tree with its translation to bytes (\pr{1042}) and the nodes with their derivatives (\pr{1043}) are in the standard library; the automaton with its table and runs is in the standard library since \pr{1044}; nothing else is implemented.}
 
 \p{A regex engine written in Reussir whose automaton is built from Brzozowski derivatives when the program runs. Its design follows Paguroidea, a lexer generator that builds its automaton when the program is compiled, and replaces each compile-time device of Paguroidea by a run-time one.}
 
@@ -308,7 +308,7 @@ U+03C0 – U+03C9      CF [80-89]
 
 \p{As in Paguroidea, a state holds one node per rule, and a rule accepts in a state when its node accepts the empty string.}
 
-\p{Since \pr{1083}, in review, the list that the search keeps for a state leaves out every rule whose node matches nothing, and each node that remains carries the number of its rule. The derivative of nothing is nothing, so such a rule never matches again, and in a lexer most rules are in that case after the first byte. Two states are equal exactly when they were before, and they are found in the same order and get the same numbers.}
+\p{Since \pr{1083} the list that the search keeps for a state leaves out every rule whose node matches nothing, and each node that remains carries the number of its rule. The derivative of nothing is nothing, so such a rule never matches again, and in a lexer most rules are in that case after the first byte. Two states are equal exactly when they were before, and they are found in the same order and get the same numbers.}
 
 \p{What the automaton produces is rule indices, nothing else:}
 

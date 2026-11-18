@@ -21,4 +21,4 @@
 }
 \p{A state of the search now holds only the rules that can still match (\pr{1083}), which [the design note](design-regex-derivatives-actions) records. The lessons are [ins-XDN9](ins-XDN9), [ins-8ZBA](ins-8ZBA) and [ins-5WKT](ins-5WKT); the account of the work is [the session](ses-A1OD).}
 
-\p{In review as the pull requests above.}
+\p{Merged as the pull requests above; those after \pr{1062} reached the main branch together through \pr{1091}.}

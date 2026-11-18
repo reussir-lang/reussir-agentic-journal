@@ -12,4 +12,4 @@
 
 \p{\code{\verb~|std::regex::alphabet::utf8::sequences(set)~} is new: the sequences of the encodings of the members of a \code{\verb~|CharSet~}, in the order of the bytes, as a list. \code{\verb~|fold_sequences~} is now a fold over that list and no longer calls its step from inside the recursion that cuts a stretch. Lowering a set of characters to bytes runs about a seventh fewer instructions. See [the session](ses-A1OD).}
 
-\p{In review as \pr{1085}.}
+\p{Merged as \pr{1085}.}

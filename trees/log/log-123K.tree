@@ -12,4 +12,4 @@
 
 \p{\code{\verb~|TextView::drop_byte(count)~} is new: the view without its first \code{\verb~|count~} bytes, and the empty view at the end when the view has fewer. Like \code{\verb~|slice_byte~} and \code{\verb~|tail_byte~} it counts bytes and does not ask for a character boundary. \code{\verb~|Automaton::longest~} uses it for the text left after a match, where it took a boxed option of a view apart; one call of \code{\verb~|longest~} runs about a quarter fewer instructions. See [the session](ses-A1OD).}
 
-\p{In review as \pr{1070}.}
+\p{Merged as \pr{1070}.}

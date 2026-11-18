@@ -12,4 +12,4 @@
 
 \p{Removing a range from a \code{\verb~|CharSet~} read two neighbouring stretches from the map after it had removed the stretches inside the range, so the map was held twice and every removal copied its path. The reads now come first. The complement of a set of 1,000 stretches takes 0.69 of the time, a difference 0.91; the results are the same. Found while measuring [the iterator in the regex module](design-wavl-walker-regex).}
 
-\p{In review as \pr{1058}.}
+\p{Merged as \pr{1058}.}

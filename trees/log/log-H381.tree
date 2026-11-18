@@ -12,4 +12,4 @@
 
 \p{\code{\verb~|WavlMap::walk~} opens a map at a position, as a \code{\verb~|Walker~}. A walker is on an entry or between two entries. \code{\verb~|seek~} moves it to a key through the tree from where it is, \code{\verb~|first~}, \code{\verb~|last~}, \code{\verb~|next~} and \code{\verb~|prev~} move it by position, \code{\verb~|entry~}, \code{\verb~|before~} and \code{\verb~|after~} read the entry there and its neighbours, and \code{\verb~|finish~} gives the map. A walker does not change the map, see [dec-DR32](dec-DR32). \code{\verb~|WavlMap::iter~} yields the entries one at a time in ascending key order. \code{\verb~|fold_left~} remains the cheapest way to read a whole map. See [the design note](design-wavl-walker).}
 
-\p{In review: \pr{1051} the walker, \pr{1052} the iterator.}
+\p{Merged: \pr{1051} the walker, \pr{1052} the iterator.}

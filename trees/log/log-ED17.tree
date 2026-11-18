@@ -12,4 +12,4 @@
 
 \p{The public enum \code{\verb~|Regex~} gains the variant \code{\verb~|Plus~}, and \code{\verb~|Regex::plus~} builds it, where it built the operand followed by its star and so held the operand twice. The operand is translated to bytes once. Code that matches on \code{\verb~|Regex~} without a catch-all arm needs an arm for it; in the library only the translation does. See [the session](ses-A1OD).}
 
-\p{In review as \pr{1086}.}
+\p{Merged as \pr{1086}.}

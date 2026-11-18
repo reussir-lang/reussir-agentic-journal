@@ -12,4 +12,4 @@
 
 \p{\code{\verb~|CharSet~} no longer builds a list of its entries to be read. The equality of two sets reads both in step through the iterator of \code{\verb~|WavlMap~} and is about three times faster for sets of 2,000 stretches; \code{\verb~|spans~} is a third faster; union, intersection and difference gain a few percent. \code{\verb~|CharSet::iter~} is new and yields the stretches in order, one at a time; the UTF-8 translation reads a set through it. See [the measurements](design-wavl-walker-regex).}
 
-\p{In review as \pr{1057}.}
+\p{Merged as \pr{1057}.}

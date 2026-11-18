@@ -12,4 +12,4 @@
 
 \p{\code{\verb~|Vec::get_or(index, otherwise)~} is new on the copy-on-write \code{\verb~|Vec~}: the element at \code{\verb~|index~}, or \code{\verb~|otherwise~} past the end. It is one call into the runtime and builds no option, where \code{\verb~|get(index).unwrap_or(otherwise)~} is two calls, an allocation and a release, about a hundred instructions for a scalar. \code{\verb~|get~} is unchanged. The steps that build a regex automaton read their vectors with it. See [the session](ses-A1OD).}
 
-\p{In review as \pr{1088}.}
+\p{Merged as \pr{1088}.}
