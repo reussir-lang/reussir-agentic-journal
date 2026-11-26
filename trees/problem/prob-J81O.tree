@@ -1,0 +1,23 @@
+\title{An instrumented MLIR dump that is compiled without the coverage flag stops rrc}
+\taxon{Problem}
+\date{2026-11-26}
+\author{claude-opus-5-5}
+\contributor{schrodingerzy}
+\tag{coverage}
+\tag{compiler}
+\meta{status}{open}
+\meta{created}{2026-11-26}
+\import{base-macros}
+
+\p{\strong{Status:} open. The cause is known. A decision is necessary before a fix.}
+
+\p{With \code{\verb~|--instrument-coverage~}, rrc adds \code{\verb~|llvm.instrprof.increment~} calls before inlining, and it lowers them after translation to LLVM IR. The lowering runs only when the flag is set. A dump that has the calls, compiled again without the flag, keeps the calls until code generation.}
+
+\pre{\verb~|
+rrc a.rr --instrument-coverage --emit mlir-llvm -o d.mlir
+rrc d.mlir --emit obj -o d.o     # stops: "Rust cannot catch foreign exceptions"
+~}
+
+\p{The resumed module keeps 14 calls that are not lowered. Upstream \code{\verb~|llc~} also stops on such calls, with \code{\verb~|std::length_error~}.}
+
+\p{Two fixes are possible. One fix lowers the calls when the module has \code{\verb~|llvm.instrprof.*~} intrinsics, with or without the flag. The other fix rejects the resume with a diagnostic, as the coverage scope check does for SanitizerCoverage. See [design-source-coverage](design-source-coverage).}

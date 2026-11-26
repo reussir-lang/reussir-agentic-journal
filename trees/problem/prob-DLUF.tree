@@ -1,0 +1,18 @@
+\title{The dispatch canonicalizer keeps equal arms apart when their locations differ}
+\taxon{Problem}
+\date{2026-11-26}
+\author{claude-opus-5-5}
+\contributor{schrodingerzy}
+\tag{coverage}
+\tag{compiler}
+\meta{status}{open}
+\meta{created}{2026-11-26}
+\import{base-macros}
+
+\p{\strong{Status:} open. A decision is necessary: exact debug locations or fewer regions.}
+
+\p{Source coverage takes the span of a region from the locations of its ops. Thus the frontend now gives the ops of each \code{\verb~|match~} arm the location of that arm (on the branch \code{\verb~|stack/source-coverage~}). Before, many of these ops had the location of the whole \code{\verb~|match~}. This change applies also when coverage is off.}
+
+\p{\code{\verb~|MergeEquivalentDispatchRegions~} in \code{\verb~|lib/IR/ReussirOps.cpp~} merges the regions of a \code{\verb~|reussir.record.dispatch~} that do the same work. It computes the hash without locations, but \code{\verb~|sameOps~} compares the ops with their locations (\code{\verb~|OperationEquivalence::None~}). Thus two different arms whose bodies make no op of their own, such as \code{\verb~|A => x, B => x~}, are not merged now. Copies of one wildcard arm still merge, because they have one location.}
+
+\p{The effect on the final code is expected to be small, but it is not measured. One fix compares with \code{\verb~|OperationEquivalence::IgnoreLocations~} and keeps one location for the merged region. With coverage on, the counter increments with different indices keep the regions apart, so this fix does not change the coverage counts. The cost is a less exact debug location for the merged arm.}

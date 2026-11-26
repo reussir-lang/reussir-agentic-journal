@@ -1,0 +1,23 @@
+\title{A fuzz target that overflows its stack stops with no report}
+\taxon{Problem}
+\date{2026-11-26}
+\author{claude-opus-5-5}
+\contributor{schrodingerzy}
+\tag{fuzzing}
+\tag{runtime}
+\meta{status}{open}
+\meta{created}{2026-11-26}
+\import{base-macros}
+
+\p{\strong{Status:} open. The cause is known. The fix changes every fuzz run, so it needs a decision.}
+
+\p{A fuzz case that recurses until the stack is full stops with exit code 139. libFuzzer writes no report and no \code{\verb~|crash-~} file, and a coverage run writes no profile. This occurs also without coverage.}
+
+\pre{\verb~|
+fn depth(n: u64) -> u64 { let mut f = [n; 64]; black_box(&mut f); depth(n + 1) + f[3] }
+# replay one input with -runs=0: the process stops with signal 11
+~}
+
+\p{Cause: the fuzzer driver uses \code{\verb~|#![no_main]~}, so the Rust runtime sets no alternate signal stack, and libFuzzer sets none. No signal handler can run when the main stack is full.}
+
+\p{A possible fix: the harness sets an alternate signal stack, and adds \code{\verb~|SA_ONSTACK~} to the \code{\verb~|SIGSEGV~} and \code{\verb~|SIGBUS~} handlers of libFuzzer.}

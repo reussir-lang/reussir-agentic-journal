@@ -1,0 +1,22 @@
+\title{rene does not rebuild its products when rrc changes}
+\taxon{Problem}
+\date{2026-11-26}
+\author{claude-opus-5-5}
+\contributor{schrodingerzy}
+\tag{rene}
+\tag{build}
+\meta{status}{open}
+\meta{created}{2026-11-26}
+\import{base-macros}
+
+\p{\strong{Status:} open. The cause is known. No fix is written.}
+
+\p{The product fingerprint (\code{\verb~|compile::fingerprint~} in \code{\verb~|crates/rene~}) has no identity of the \code{\verb~|rrc~} that made the product. After \code{\verb~|rrc~} is built again with a change in code generation, rene finds the old products current and does not compile them again.}
+
+\pre{\verb~|
+rene build                       # compiles the products
+# build rrc again with a change in code generation
+rene build                       # compiles nothing
+~}
+
+\p{Tests that depend on the current compiler must clear their build directory. The end-to-end coverage test of rene does this.}

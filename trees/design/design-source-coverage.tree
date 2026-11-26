@@ -5,11 +5,13 @@
 \contributor{schrodingerzy}
 \tag{design}
 \tag{tooling}
+\tag{coverage}
 \meta{status}{draft}
 \meta{created}{2026-11-26}
+\meta{updated}{2026-11-26}
 \import{base-macros}
 
-\p{\strong{Status:} draft. The pull requests go to the branch \code{\verb~|stack/source-coverage~}, which starts from \pr{1114}.}
+\p{\strong{Status:} draft. The pull requests go to the branch \code{\verb~|stack/source-coverage~}, which starts from \pr{1114}. The driver flag, the runtime link, rene and the lit tools are on that branch. The two MLIR passes (\pr{1126}, \pr{1134}) and the pass wiring (\pr{1130}) are complete but are not on it yet. With all of them together, a test program gives the correct counts from end to end.}
 
 \p{The fuzzing engine uses LLVM SanitizerCoverage. That coverage guides libFuzzer, but it does not show which lines of a Reussir source file a corpus executes. Source-based code coverage gives that report. It uses the LLVM format that clang and rustc use, and \code{\verb~|llvm-cov~} makes the report.}
 
@@ -17,20 +19,37 @@
 \title{Parts}
 
 \ol{
-\li{The pass \code{\verb~|reussir-instrument-coverage~} runs on the module that the frontend makes, before inlining and before optimization. It adds a counter at the entry of each function. It also adds a counter at the start of each region of an op that implements \code{\verb~|RegionBranchOpInterface~}. A counter is a call of \code{\verb~|llvm.instrprof.increment~}. The pass takes the source span of a region from the \code{\verb~|FileLineColRange~} locations of its ops. It writes the attribute \code{\verb~|reussir.coverage.map~} on each function.}
-\li{The pass \code{\verb~|reussir-emit-coverage-mapping~} runs next. It encodes each attribute with the LLVM coverage mapping writer. It emits the \code{\verb~|__covrec_~} records and the \code{\verb~|__llvm_coverage_mapping~} header, as clang does.}
-\li{After the LLVM pipeline, \code{\verb~|InstrProfilingLoweringPass~} lowers the counters. The executable links the LLVM profile runtime, which writes a \code{\verb~|.profraw~} file at exit.}
-\li{The option \code{\verb~|rrc --instrument-coverage~} turns this on. rene builds with coverage, and \code{\verb~|rene coverage~} runs a corpus, merges the profiles and makes the report with \code{\verb~|llvm-cov~}.}
+\li{The pass \code{\verb~|reussir-instrument-coverage~} (\pr{1126}) runs on the module that the frontend makes, before inlining and before optimization. It adds a counter at the entry of each function. It also adds a counter at the start of each region of a \code{\verb~|RegionBranchOpInterface~} op that can run a different number of times than its op (\pr{1137}), and of each closure body (\pr{1135}). A counter is a call of \code{\verb~|llvm.instrprof.increment~}. The span of a region is the union of the \code{\verb~|FileLineColRange~} locations of its ops. The pass writes the attribute \code{\verb~|reussir.coverage.map~} on each function. Conditions of \code{\verb~|scf.if~} get branch regions (\pr{1154}).}
+\li{The pass \code{\verb~|reussir-emit-coverage-mapping~} (\pr{1134}) runs next. It encodes each attribute with the LLVM coverage mapping writer. It emits the \code{\verb~|__covrec_~} records and the \code{\verb~|__llvm_coverage_mapping~} header in \code{\verb~|llvm.used~}, as clang does, and it removes the attribute.}
+\li{\code{\verb~|rrc --instrument-coverage~} (\pr{1116}, \pr{1130}) runs the two passes after the coverage scope is set, and lowers the counters with \code{\verb~|InstrProfilingLoweringPass~}. \pr{1151} moves the lowering to the start of the LLVM pipeline, where clang and rustc put it. rrc links \code{\verb~|profiler_builtins~} from the target libdir of the link rustc (\pr{1150}).}
+\li{rene builds with coverage (\pr{1118}, \pr{1122}). \code{\verb~|rene coverage~} (\pr{1121}, \pr{1127}) runs a fuzz target over a corpus with \code{\verb~|-runs=0~}, merges the profiles with \code{\verb~|llvm-profdata~} and makes the report with \code{\verb~|llvm-cov~}. The harness writes the profile when a case crashes (\pr{1128}, \pr{1139}).}
 }
 }
 
 \subtree[design-source-coverage-decisions]{
-\title{Decisions in this draft}
+\title{Decisions}
 
 \ul{
-\li{The instrumentation runs before inlining. An inlined counter keeps the name of its function, so the count stays with the callee.}
-\li{Each region has its own counter. This draft uses no counter expressions.}
-\li{A counter is the LLVM intrinsic, called through \code{\verb~|llvm.call_intrinsic~}. This draft adds no Reussir op.}
-\li{The coverage scope that selects the functions for SanitizerCoverage also selects the functions for source coverage.}
+\li{The instrumentation runs before inlining. An inlined counter keeps the name of its function, so the count stays with the callee. The Reussir passes that stop at unknown ops skip a counter (\pr{1133}, \pr{1124}), so a coverage build optimizes like a normal build.}
+\li{Each region has its own physical counter. There are no counter expressions.}
+\li{A counter is the LLVM intrinsic, called through \code{\verb~|llvm.call_intrinsic~}. There is no new Reussir op.}
+\li{The PGO name comes from \code{\verb~|llvm::getPGOFuncName~}: \code{\verb~|<file>:<symbol>~} for a function with local linkage. The \code{\verb~|llvm.linkage~} attribute decides this, not \code{\verb~|sym_visibility~}.}
+\li{The function hash covers the counter count and each span. A changed span gives a hash mismatch, which \code{\verb~|llvm-cov~} reports. It never gives wrong counts.}
+\li{The coverage scope that selects the functions for SanitizerCoverage also selects the functions for source coverage (\pr{1141}).}
+\li{The runtime is \code{\verb~|profiler_builtins~}, not \code{\verb~|libclang_rt.profile~}, because Rust ships it for each target that the project builds for. The final rustc call does not get \code{\verb~|-C instrument-coverage~}, because that would add records for the temporary launcher files.}
+}
+}
+
+\subtree[design-source-coverage-open]{
+\title{Open questions}
+
+\ul{
+\li{Line counts: a region that starts in the middle of a line gives that line the count of the enclosing region. Gap regions (\pr{1138}, \pr{1140}) and the rule that ops with the location of the parent op do not widen a region (\pr{1162}) address this.}
+\li{The span of counter 0 is the body expression, and an arm span leaves out the pattern, because MIR keeps no span for a declaration or a pattern.}
+\li{A condition held in a variable gets no branch region. The right operand of \code{\verb~|&&~} and \code{\verb~|||~} gets no branch region, because it needs a counter expression or more counters.}
+\li{A function that the compiler removes after instrumentation leaves a record without a name, and \code{\verb~|llvm-cov~} then rejects the binary. Clang solves this with \code{\verb~|__llvm_coverage_names~}.}
+\li{A profile is lost when libFuzzer stops on a timeout, a memory limit or a call of \code{\verb~|exit~}. Continuous mode (\code{\verb~|%c~} with counter relocation) keeps it.}
+\li{The span hash makes each function below an inserted line stale. Clang hashes the structure of the function. The PGO names of private functions change with \code{\verb~|--codegen-units~}.}
+\li{Problems found during this work: [prob-J81O](prob-J81O), [prob-DLUF](prob-DLUF), [prob-TWW0](prob-TWW0), [prob-651X](prob-651X), [prob-SXH9](prob-SXH9).}
 }
 }

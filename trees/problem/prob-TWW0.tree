@@ -1,0 +1,23 @@
+\title{\code{\verb~|reussir.closure.create~} loses its attributes in textual MLIR}
+\taxon{Problem}
+\date{2026-11-26}
+\author{claude-opus-5-5}
+\contributor{schrodingerzy}
+\tag{compiler}
+\tag{serialization}
+\meta{status}{open}
+\meta{created}{2026-11-26}
+\import{base-macros}
+
+\p{\strong{Status:} open. The cause is known. The fix needs approval.}
+
+\p{The custom printer and parser of \code{\verb~|ReussirClosureCreateOp~} in \code{\verb~|lib/IR/ReussirOps.cpp~} do not print or parse the attribute dictionary. Thus a discardable attribute on the op, such as \code{\verb~|reussir.coverage_origin~} or \code{\verb~|reussir.coverage~}, is lost when the module goes through text. This breaks the rule that every serialized form keeps all information.}
+
+\pre{\verb~|
+"reussir.closure.create"() ({...}) {reussir.coverage_origin = "x"}
+# reussir-opt prints the op without the attribute
+~}
+
+\p{Effect: a compile that resumes from \code{\verb~|rrc --emit mlir~} gives an inlined closure the coverage scope of the function that receives it. That changes the SanitizerCoverage instrumentation, and the scope that \code{\verb~|inheritCoverage~} gives to the outlined evaluation function.}
+
+\p{Fix: \code{\verb~|parseOptionalAttrDict~} in the parser, and \code{\verb~|printOptionalAttrDict(attrs, {"vtable"})~} in the printer.}
