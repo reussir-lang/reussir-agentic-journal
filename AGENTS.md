@@ -112,6 +112,11 @@ verified, and change it to `\taxon{Insight}` once it is.
 
 ## Writing rules
 
+- Write new and changed trees in ASD-STE100 Simplified Technical English:
+  approved words with their approved meanings, sentences of at most 20 words
+  for an instruction and 25 for a description, the active voice, and one
+  instruction in each sentence. Technical names, such as code identifiers,
+  stay as they are.
 - Write for a reader who has no access to any conversation. Trees may cite
   pull requests (`\pr{123}`), issues (`\issue{123}`) and session trees. They
   must never refer to a chat or to "the user".

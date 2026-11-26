@@ -1,0 +1,36 @@
+\title{Source-based code coverage}
+\taxon{Design}
+\date{2026-11-26}
+\author{claude-opus-5-5}
+\contributor{schrodingerzy}
+\tag{design}
+\tag{tooling}
+\meta{status}{draft}
+\meta{created}{2026-11-26}
+\import{base-macros}
+
+\p{\strong{Status:} draft. The pull requests go to the branch \code{\verb~|stack/source-coverage~}, which starts from \pr{1114}.}
+
+\p{The fuzzing engine uses LLVM SanitizerCoverage. That coverage guides libFuzzer, but it does not show which lines of a Reussir source file a corpus executes. Source-based code coverage gives that report. It uses the LLVM format that clang and rustc use, and \code{\verb~|llvm-cov~} makes the report.}
+
+\subtree[design-source-coverage-parts]{
+\title{Parts}
+
+\ol{
+\li{The pass \code{\verb~|reussir-instrument-coverage~} runs on the module that the frontend makes, before inlining and before optimization. It adds a counter at the entry of each function. It also adds a counter at the start of each region of an op that implements \code{\verb~|RegionBranchOpInterface~}. A counter is a call of \code{\verb~|llvm.instrprof.increment~}. The pass takes the source span of a region from the \code{\verb~|FileLineColRange~} locations of its ops. It writes the attribute \code{\verb~|reussir.coverage.map~} on each function.}
+\li{The pass \code{\verb~|reussir-emit-coverage-mapping~} runs next. It encodes each attribute with the LLVM coverage mapping writer. It emits the \code{\verb~|__covrec_~} records and the \code{\verb~|__llvm_coverage_mapping~} header, as clang does.}
+\li{After the LLVM pipeline, \code{\verb~|InstrProfilingLoweringPass~} lowers the counters. The executable links the LLVM profile runtime, which writes a \code{\verb~|.profraw~} file at exit.}
+\li{The option \code{\verb~|rrc --instrument-coverage~} turns this on. rene builds with coverage, and \code{\verb~|rene coverage~} runs a corpus, merges the profiles and makes the report with \code{\verb~|llvm-cov~}.}
+}
+}
+
+\subtree[design-source-coverage-decisions]{
+\title{Decisions in this draft}
+
+\ul{
+\li{The instrumentation runs before inlining. An inlined counter keeps the name of its function, so the count stays with the callee.}
+\li{Each region has its own counter. This draft uses no counter expressions.}
+\li{A counter is the LLVM intrinsic, called through \code{\verb~|llvm.call_intrinsic~}. This draft adds no Reussir op.}
+\li{The coverage scope that selects the functions for SanitizerCoverage also selects the functions for source coverage.}
+}
+}
