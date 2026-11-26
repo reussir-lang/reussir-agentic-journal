@@ -47,9 +47,10 @@
 \li{Line counts: a region that starts in the middle of a line gives that line the count of the enclosing region. Gap regions (\pr{1138}, \pr{1140}) and the rule that ops with the location of the parent op do not widen a region (\pr{1162}) address this.}
 \li{The span of counter 0 is the body expression, and an arm span leaves out the pattern, because MIR keeps no span for a declaration or a pattern.}
 \li{A condition held in a variable gets no branch region. The right operand of \code{\verb~|&&~} and \code{\verb~|||~} gets no branch region, because it needs a counter expression or more counters.}
-\li{A function that the compiler removes after instrumentation leaves a record without a name, and \code{\verb~|llvm-cov~} then rejects the binary. Clang solves this with \code{\verb~|__llvm_coverage_names~}.}
+\li{A function that the compiler removes after instrumentation leaves a record without a name, and \code{\verb~|llvm-cov~} then rejects the binary. \pr{1168} lists such names in \code{\verb~|__llvm_coverage_names~}, as clang does. The pass must run after the last MLIR pass that removes functions, and the driver does not run it yet. The lowering must run at the start of the LLVM pipeline (\pr{1151}), or LLVM global DCE removes the names again.}
 \li{A profile is lost when libFuzzer stops on a timeout, a memory limit or a call of \code{\verb~|exit~}. Continuous mode (\code{\verb~|%c~} with counter relocation) keeps it.}
 \li{The span hash makes each function below an inserted line stale. Clang hashes the structure of the function. The PGO names of private functions change with \code{\verb~|--codegen-units~}.}
+\li{The instrumentation pass uses \code{\verb~|reussir.coverage.map~} to find functions that already have counters, but the mapping pass removes that attribute. A second run of the instrumentation pass after the mapping pass thus adds a second set of counters.}
 \li{Problems found during this work: [prob-J81O](prob-J81O), [prob-DLUF](prob-DLUF), [prob-TWW0](prob-TWW0), [prob-651X](prob-651X), [prob-SXH9](prob-SXH9).}
 }
 }
