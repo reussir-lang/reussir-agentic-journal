@@ -1,0 +1,25 @@
+\title{A swarm of 32 agents builds source-based code coverage for the fuzzing engine}
+\taxon{Session}
+\date{2026-11-26}
+\author{claude-opus-5-5}
+\contributor{schrodingerzy}
+\tag{coverage}
+\tag{fuzzing}
+\tag{tooling}
+\meta{harness}{Claude Code}
+\meta{model-id}{claude-opus-5-5}
+\import{base-macros}
+
+\p{The maintainer asked for a swarm of 32 agents with a hard deadline, builds in the memory-capped slice, pull requests of about 200 lines that land during the work, and no load on the metered CI cache. The first step was a rule for agents: new journal trees and code comments follow ASD-STE100 (\pr{1114}).}
+
+\p{The subject was source-based code coverage for the fuzzing engine: LLVM counters and a coverage mapping, so that \code{\verb~|llvm-cov~} shows which lines of a Reussir source a corpus executes. The design is in [design-source-coverage](design-source-coverage).}
+
+\p{\strong{How the work ran.} The pull requests go to the branch \code{\verb~|stack/source-coverage~}. No workflow runs for a pull request on that branch, so the work started no CI. A brief gave each agent a contract and a part. Agents 01 to 16 built on the workstation, and agents 17 to 32 on the desktop. Each build ran in \code{\verb~|reussir-agents.slice~}, through one sccache server for each host on S3, with \code{\verb~|SCCACHE_BASEDIRS~} over the worktrees. The harness ran at most 20 agents at a time, so agents 21 to 32 started when others finished.}
+
+\p{\strong{On the stack branch.} \pr{1114}, \pr{1116}, \pr{1118}, \pr{1119}, \pr{1120}, \pr{1121}, \pr{1122}, \pr{1123}, \pr{1124}, \pr{1127}, \pr{1128}, \pr{1129}, \pr{1132}, \pr{1133}, \pr{1139}, \pr{1150}.}
+
+\p{\strong{Complete, not on the branch.} The instrumentation pass \pr{1126} could not be marked ready: the permission check refused the agent's request. The pull requests that build on it wait for it: \pr{1134} (mapping), \pr{1130} (driver wiring), \pr{1135}, \pr{1137}, \pr{1142}, \pr{1144}, \pr{1154}, \pr{1155}, \pr{1157} and the tests above them. Combined in local trees, the parts gave correct counts from end to end for functions, branches, \code{\verb~|match~} arms, loops, closures, generic instances, inlined helpers, units, LTO links and fuzz replays through rene.}
+
+\p{\strong{Problems found.} [prob-J81O](prob-J81O), [prob-DLUF](prob-DLUF), [prob-TWW0](prob-TWW0), [prob-651X](prob-651X), [prob-SXH9](prob-SXH9).}
+
+\p{\strong{Lessons for a swarm.} \code{\verb~|gh pr merge --delete-branch~} also removes a local worktree that has the merged branch checked out. Delete only the remote branch. The scratch directory is shared by all agents, so each agent needs its own subdirectory. An agent that waits for its own build keeps its slot.}
